@@ -1,0 +1,35 @@
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment variables and API keys
+.env
+.env.local
+**/api-keys.txt
+**/*_secret.js
+
+# Temporary files
+*.tmp
+*.temp
+
+# Browser extension specific
+*.crx
+*.pem
+*.zip
+

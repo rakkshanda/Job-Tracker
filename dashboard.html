@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobTracker - Supabase Dashboard</title>
+    <link rel="icon" type="image/png" href="icon16.png">
+    <link rel="stylesheet" href="dashboard.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Supabase CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <div class="logo">
+                <i class="fas fa-heart" style="color: #ff6b9d;"></i>
+                <span>JobTracker</span>
+            </div>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode">
+            <i class="fas fa-moon"></i>
+        </button>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <!-- Header Section -->
+        <div class="header-section">
+            <div class="action-buttons">
+                <!-- <button class="action-btn import-btn" id="import-csv-btn">
+                    <i class="fas fa-upload"></i>
+                    Import CSV
+                </button> -->
+                <button class="action-btn delete-selected-btn" id="delete-selected-btn" style="display: none;">
+                    <i class="fas fa-trash-alt"></i>
+                    Delete Selected (<span id="selected-count">0</span>)
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-section">
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-briefcase"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="total-applications">0</div>
+                    <div class="stat-label">Total Applications</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-building"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="total-companies">0</div>
+                    <div class="stat-label">Companies</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-map-marker-alt"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="total-locations">0</div>
+                    <div class="stat-label">Locations</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-fire"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="current-streak">0</div>
+                    <div class="stat-label">Days Current Streak</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Jobs Table -->
+        <div class="jobs-section table-section">
+            <div class="table-header">
+                <!-- Search Bar -->
+                <div class="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="search-input" class="search-input" placeholder="Search jobs by company, position...">
+                </div>
+                
+                <!-- Filter Buttons -->
+                <div class="filter-buttons">
+                        <button class="clear-filters-btn" id="clear-filters-btn" title="Clear all filters" style="display: none;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <div class="filter-group">
+                            <button class="filter-btn" data-filter="date">
+                                <i class="fas fa-calendar"></i>
+                                <span class="filter-value">All Time</span>
+                            </button>
+                            <div class="filter-dropdown">
+                                <div class="filter-option" data-value="all">All Time</div>
+                                <div class="filter-option" data-value="today">Today</div>
+                                <div class="filter-option" data-value="week">This Week</div>
+                                <div class="filter-option" data-value="month">This Month</div>
+                                <div class="filter-option" data-value="3months">Last 3 Months</div>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <button class="filter-btn" data-filter="status">
+                                <i class="fas fa-filter"></i>
+                                <span class="filter-value">Status</span>
+                            </button>
+                            <div class="filter-dropdown">
+                                <div class="filter-option" data-value="all">All Status</div>
+                                <div class="filter-option" data-value="saved">Saved</div>
+                                <div class="filter-option" data-value="applied">Applied</div>
+                                <div class="filter-option" data-value="resume_screening">Resume Screening</div>
+                                <div class="filter-option" data-value="interview">Interview</div>
+                                <div class="filter-option" data-value="offer">Offer</div>
+                                <div class="filter-option" data-value="rejected">Rejected</div>
+                                <div class="filter-option" data-value="withdrawn">Withdrawn</div>
+                                <div class="filter-option" data-value="ended">Ended</div>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <button class="filter-btn" data-filter="company">
+                                <i class="fas fa-building"></i>
+                                <span class="filter-value">All Companies</span>
+                            </button>
+                            <div class="filter-dropdown">
+                                <div class="filter-option" data-value="all">All Companies</div>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <button class="filter-btn" data-filter="location">
+                                <i class="fas fa-map-marker-alt"></i>
+                                <span class="filter-value">All Locations</span>
+                            </button>
+                            <div class="filter-dropdown">
+                                <div class="filter-option" data-value="all">All Locations</div>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <button class="filter-btn" data-filter="source">
+                                <i class="fas fa-globe"></i>
+                                <span class="filter-value">All Sources</span>
+                            </button>
+                            <div class="filter-dropdown">
+                                <div class="filter-option" data-value="all">All Sources</div>
+                            </div>
+                        </div>
+                        <button class="refresh-icon-btn" id="refresh-btn" title="Refresh Data">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <table class="jobs-table">
+                    <thead>
+                        <tr>
+                            <th class="col-select" style="width: 40px;">
+                                <input type="checkbox" id="select-all-checkbox" title="Select/Deselect All">
+                            </th>
+                            <th class="col-date">Applied Date</th>
+                            <th class="col-company">Company</th>
+                            <th class="col-title">Title</th>
+                            <th class="col-location">Location</th>
+                            <th class="col-status">Status</th>
+                            <th class="col-source">Source</th>
+                            <th class="col-url">URL</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-container">
+                        <!-- Jobs will be rendered here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="pagination-container" id="pagination-container"></div>
+        </div>
+    </div>
+
+    <!-- Add Job Modal -->
+    <div class="modal" id="add-job-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add New Job Application</h2>
+                <button class="close-btn" id="close-add-modal">&times;</button>
+            </div>
+            <form id="add-job-form">
+                <div class="form-group">
+                    <label for="job-title">Job Title *</label>
+                    <input type="text" id="job-title" required>
+                </div>
+                <div class="form-group">
+                    <label for="job-company">Company *</label>
+                    <input type="text" id="job-company" required>
+                </div>
+                <div class="form-group">
+                    <label for="job-location">Location</label>
+                    <input type="text" id="job-location">
+                </div>
+                <div class="form-group">
+                    <label for="job-url">Job URL</label>
+                    <input type="url" id="job-url">
+                </div>
+                <div class="form-group">
+                    <label for="job-description">Description</label>
+                    <textarea id="job-description" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="job-notes">Notes</label>
+                    <textarea id="job-notes" rows="3" placeholder="Add any additional notes about this job..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="job-status">Status</label>
+                    <select id="job-status">
+                        <option value="saved">Saved</option>
+                        <option value="applied">Applied</option>
+                        <option value="resume_screening">Resume Screening</option>
+                        <option value="interview">Interview</option>
+                        <option value="offer">Offer</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="withdrawn">Withdrawn</option>
+                        <option value="ended">Ended</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-add-job">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Job</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Comment Modal -->
+    <div class="modal" id="comment-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Comment</h2>
+                <button class="close-btn" id="close-comment-modal">&times;</button>
+            </div>
+            <form id="comment-form">
+                <div class="form-group">
+                    <label for="comment-text">Comment</label>
+                    <textarea id="comment-text" rows="4" placeholder="Add your notes about this application..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-comment">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Comment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Import Modal -->
+    <div class="modal" id="import-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Jobs from CSV</h2>
+                <button class="close-btn" id="close-import-modal">&times;</button>
+            </div>
+            <div class="import-content">
+                <div class="file-upload-area" id="file-upload-area">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Click to upload CSV file</p>
+                    <input type="file" id="csv-file" accept=".csv" style="display: none;">
+                </div>
+                <div class="import-info">
+                    <h4>CSV Format:</h4>
+                    <p>Title, Company, Location, Applied Date, Status, URL, Description, Notes</p>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-import">Cancel</button>
+                    <button type="button" class="btn-primary" id="import-btn" disabled>Import Jobs</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

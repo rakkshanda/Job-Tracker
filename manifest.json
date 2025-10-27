@@ -1,0 +1,33 @@
+{
+    "manifest_version": 3,
+    "name": "Job Tracker",
+    "version": "2.0.0",
+    "description": "Save and track job applications with AI-powered scraping and Supabase integration.",
+    "permissions": ["activeTab", "scripting", "storage"],
+    "host_permissions": ["<all_urls>", "https://api.openai.com/*", "https://*.supabase.co/*"],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "action": {
+      "default_title": "Job Tracker - Use floating button on page"
+    },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["floating-button.js"],
+        "run_at": "document_idle"
+      }
+    ],
+    "web_accessible_resources": [
+      {
+        "resources": ["popup.html"],
+        "matches": ["<all_urls>"]
+      }
+    ],
+    "icons": {
+      "16": "icon16.png",
+      "48": "icon16.png",
+      "128": "icon16.png"
+    }
+  }
+  
