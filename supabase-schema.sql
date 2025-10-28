@@ -15,6 +15,7 @@ CREATE TABLE jobs (
     notes TEXT,
     comments TEXT,
     source TEXT DEFAULT 'Manual Entry',
+    status_history JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -50,6 +51,10 @@ CREATE TRIGGER update_jobs_updated_at
     BEFORE UPDATE ON jobs 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Migration: Add status_history column to existing tables
+-- Run this ONLY if you already have a jobs table without status_history
+-- ALTER TABLE jobs ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb;
 
 -- Insert some sample data (optional)
 INSERT INTO jobs (title, company, location, status, applied_date, url, description) VALUES

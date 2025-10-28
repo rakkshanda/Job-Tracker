@@ -9,6 +9,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Google Charts for Sankey Diagram -->
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -16,16 +18,26 @@
         <div class="nav-brand">
             <div class="logo">
                 <i class="fas fa-heart" style="color: #ff6b9d;"></i>
-                <span>JobTracker</span>
+                <span id="live-datetime">Loading...</span>
             </div>
         </div>
-        <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode">
-            <i class="fas fa-moon"></i>
-        </button>
+        <div class="nav-actions">
+            <button class="insights-toggle-btn" id="insights-toggle-btn" title="Show Insights">
+                <i class="fas fa-chart-bar"></i>
+                <span>Show Insights</span>
+            </button>
+            <button class="sankey-toggle-btn" id="sankey-toggle-btn" title="Show Sankey diagram">
+                <i class="fas fa-chart-line"></i>
+                <span>Show Sankey</span>
+            </button>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode">
+                <i class="fas fa-moon"></i>
+            </button>
+        </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="main-container">
+    <div class="main-container" id="main-container">
         <!-- Header Section -->
         <div class="header-section">
             <div class="action-buttons">
@@ -37,6 +49,167 @@
                     <i class="fas fa-trash-alt"></i>
                     Delete Selected (<span id="selected-count">0</span>)
                 </button>
+            </div>
+        </div>
+
+        <!-- Insights Section -->
+        <div class="insights-section" id="insights-section" style="display: none;">
+            <h2 class="insights-title">Insights</h2>
+            
+            <div class="insights-grid">
+                <!-- Performance Metrics -->
+                <div class="insights-category">
+                    <h3 class="category-title">Performance Metrics</h3>
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <div class="metric-label">Ghost Rate</div>
+                            <div class="metric-value ghost-rate" id="ghost-rate">0%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Response Time</div>
+                            <div class="metric-value" id="response-time">0 days</div>
+                        </div>
+                    </div>
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <div class="metric-label">Longest Waiting Application</div>
+                            <div class="metric-value" id="longest-waiting">0 days</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Volume Metrics -->
+                <div class="insights-category">
+                    <h3 class="category-title">Volume Metrics</h3>
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <div class="metric-label">Total Applications</div>
+                            <div class="metric-value teal" id="total-apps-insight">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Most Active Day</div>
+                            <div class="metric-value" id="most-active-day">
+                                <span class="day-name">-</span>
+                                <span class="day-count">0 apps</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="metrics-row">
+                        <div class="metric-card full-width">
+                            <div class="metric-label">Application Rate</div>
+                            <div class="metric-value-group">
+                                <div class="rate-item">
+                                    <span class="rate-value" id="rate-daily">0</span>
+                                    <span class="rate-unit">/day</span>
+                                </div>
+                                <div class="rate-item">
+                                    <span class="rate-value" id="rate-weekly">0</span>
+                                    <span class="rate-unit">/wk</span>
+                                </div>
+                                <div class="rate-item">
+                                    <span class="rate-value" id="rate-monthly">0</span>
+                                    <span class="rate-unit">/mo</span>
+                                </div>
+                                <div class="rate-item">
+                                    <span class="rate-value" id="rate-yearly">0</span>
+                                    <span class="rate-unit">/yr</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversion Funnel -->
+                <div class="insights-category">
+                    <h3 class="category-title">Conversion Funnel</h3>
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <div class="metric-label">Applied → Screening</div>
+                            <div class="metric-value conversion" id="conv-screening">0%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Screening → Interview</div>
+                            <div class="metric-value conversion" id="conv-interview">0%</div>
+                        </div>
+                    </div>
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <div class="metric-label">Interview → Offer</div>
+                            <div class="metric-value conversion" id="conv-offer">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Summary Cards -->
+        <div class="activity-summary" id="activity-summary">
+            <!-- This Month Card -->
+            <div class="activity-card">
+                <div class="activity-header">
+                    <select class="month-selector" id="month-selector">
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="activity-total" id="month-total">0 applications</div>
+                <div class="activity-weeks">
+                    <div class="week-item">
+                        <div class="week-label">Week 1</div>
+                        <div class="week-count" id="week-1">0</div>
+                    </div>
+                    <div class="week-item">
+                        <div class="week-label">Week 2</div>
+                        <div class="week-count" id="week-2">0</div>
+                    </div>
+                    <div class="week-item">
+                        <div class="week-label">Week 3</div>
+                        <div class="week-count" id="week-3">0</div>
+                    </div>
+                    <div class="week-item">
+                        <div class="week-label">Week 4</div>
+                        <div class="week-count" id="week-4">0</div>
+                    </div>
+                    <div class="week-item">
+                        <div class="week-label">Week 5</div>
+                        <div class="week-count" id="week-5">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- This Week Card -->
+            <div class="activity-card">
+                <h3 class="activity-title">This Week <span class="week-range" id="week-range"></span></h3>
+                <div class="activity-total" id="week-total">0 applications</div>
+                <div class="activity-days">
+                    <div class="day-item">
+                        <div class="day-label">Mon</div>
+                        <div class="day-count" id="day-mon">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Tue</div>
+                        <div class="day-count" id="day-tue">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Wed</div>
+                        <div class="day-count" id="day-wed">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Thu</div>
+                        <div class="day-count" id="day-thu">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Fri</div>
+                        <div class="day-count" id="day-fri">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Sat</div>
+                        <div class="day-count" id="day-sat">0</div>
+                    </div>
+                    <div class="day-item">
+                        <div class="day-label">Sun</div>
+                        <div class="day-count" id="day-sun">0</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -185,6 +358,59 @@
         </div>
     </div>
 
+    <!-- Sankey Diagram View -->
+    <div class="sankey-container" id="sankey-container" style="display: none;">
+   
+        <!-- Sankey Filters -->
+        <div class="sankey-filters">
+            <div class="filter-group">
+                <label for="sankey-date-from">From Date:</label>
+                <input type="date" id="sankey-date-from" class="date-input">
+            </div>
+            <div class="filter-group">
+                <label for="sankey-date-to">To Date:</label>
+                <input type="date" id="sankey-date-to" class="date-input">
+            </div>
+            <div class="filter-group">
+                <label>Status Filter:</label>
+                <div class="status-checkboxes" id="sankey-status-filter">
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="saved" checked> Saved
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="applied" checked> Applied
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="resume_screening" checked> Resume Screening
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="interview" checked> Interview
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="offer" checked> Offer
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="rejected" checked> Rejected
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="withdrawn" checked> Withdrawn
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="ended" checked> Ended
+                    </label>
+                </div>
+            </div>
+            <button class="refresh-sankey-btn" id="refresh-sankey-btn" title="Refresh Sankey Data">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+
+        <!-- Sankey Chart -->
+        <div class="sankey-chart-container">
+            <div id="sankey-chart"></div>
+        </div>
+    </div>
+
     <!-- Add Job Modal -->
     <div class="modal" id="add-job-modal">
         <div class="modal-content">
@@ -206,8 +432,8 @@
                     <input type="text" id="job-location">
                 </div>
                 <div class="form-group">
-                    <label for="job-url">Job URL</label>
-                    <input type="url" id="job-url">
+                    <label for="job-url">Job URL <span style="color: #94a3b8; font-size: 0.85rem;">(optional)</span></label>
+                    <input type="text" id="job-url">
                 </div>
                 <div class="form-group">
                     <label for="job-description">Description</label>
@@ -229,6 +455,37 @@
                         <option value="withdrawn">Withdrawn</option>
                         <option value="ended">Ended</option>
                     </select>
+                </div>
+                <div class="status-history-section" id="status-history-section" style="display: none;">
+                    <label>Status Change History <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal;">(Drag to reorder)</span></label>
+                    
+                    <!-- Add New Status Change -->
+                    <div class="add-status-change" style="display: flex; gap: 0.75rem; margin-bottom: 1rem; align-items: flex-end;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.85rem; margin-bottom: 0.25rem; display: block;">Status:</label>
+                            <select id="new-status-select" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary);">
+                                <option value="saved">Saved</option>
+                                <option value="applied">Applied</option>
+                                <option value="resume_screening">Resume Screening</option>
+                                <option value="interview">Interview</option>
+                                <option value="offer">Offer</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="withdrawn">Withdrawn</option>
+                                <option value="ended">Ended</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.85rem; margin-bottom: 0.25rem; display: block;">Date & Time:</label>
+                            <input type="datetime-local" id="new-status-date" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--input-bg); color: var(--text-primary);">
+                        </div>
+                        <button type="button" id="add-status-btn" style="padding: 0.5rem 1rem; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; font-weight: 500;">
+                            <i class="fas fa-plus"></i> Add Status
+                        </button>
+                    </div>
+                    
+                    <div class="status-history-list" id="status-history-list">
+                        <!-- History items will be dynamically added here -->
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" id="cancel-add-job">Cancel</button>

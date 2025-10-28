@@ -17,17 +17,33 @@ class SupabaseJobTracker {
         this.sourceOptions = ['LinkedIn', 'Handshake', 'Indeed', 'URL'];
         this.isRefreshing = false;
         
+        // Temporary status history (not saved until "Save Job" is clicked)
+        this.tempStatusHistory = [];
+        
         // Pagination
         this.currentPage = 1;
         this.itemsPerPage = 50;
+        
+        // Selected month for activity summary (null = current month)
+        this.selectedMonth = null;
         
         // Initialize Supabase
         const SUPABASE_URL = 'https://dmzonyrwdqzugsshcxgb.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtem9ueXJ3ZHF6dWdzc2hjeGdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExNzgzNTgsImV4cCI6MjA3Njc1NDM1OH0.0MYp26X7h1JR_r4KO-p_f3aX-dsiaO6Z9ZS8rjU9e7g';
         this.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
         console.log('✅ Supabase client initialized:', this.supabase);
         
         this.init();
+    }
+
+    // Helper function to get today's date in local timezone (YYYY-MM-DD)
+    getTodayDate() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 
     sanitize(text) {
@@ -68,6 +84,27 @@ class SupabaseJobTracker {
     formatDate(dateString) {
         if (!dateString) return '—';
         try {
+            // Parse date as local timezone to avoid UTC conversion issues
+            // Format: YYYY-MM-DD
+            const parts = dateString.split('-');
+            if (parts.length === 3) {
+                const year = parseInt(parts[0]);
+                const month = parseInt(parts[1]) - 1; // Month is 0-indexed
+                const day = parseInt(parts[2]);
+                const date = new Date(year, month, day);
+                
+                if (Number.isNaN(date.getTime())) {
+                    return this.sanitize(dateString);
+                }
+                
+                return date.toLocaleDateString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+            }
+            
+            // Fallback for other formats
             const date = new Date(dateString);
             if (Number.isNaN(date.getTime())) {
                 return this.sanitize(dateString);
@@ -90,16 +127,525 @@ class SupabaseJobTracker {
         return normalized.charAt(0).toUpperCase() + normalized.slice(1);
     }
 
+    getLastStatusChangeDate(job) {
+        if (!job.status_history || job.status_history.length === 0) {
+            return '';
+        }
+        
+        const lastChange = job.status_history[job.status_history.length - 1];
+        const date = new Date(lastChange.timestamp);
+        const formattedDate = date.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric',
+            year: 'numeric'
+        });
+        
+        return formattedDate; // Just the date, no "Changed:" prefix
+    }
+
     async init() {
         console.log('Initializing Supabase JobTracker...');
         this.setupEventListeners();
+        this.startLiveClock();
         await this.loadJobs();
         this.applyFilters(); // Apply default filters (saved & applied)
         this.renderJobs();
         this.updateStats();
         this.populateFilterOptions();
+        this.initSankey();
         console.log('Supabase JobTracker initialized successfully');
         console.log('✅ Default filter applied: showing only Saved & Applied jobs');
+    }
+
+    startLiveClock() {
+        const updateClock = () => {
+            const now = new Date();
+            
+            // Format: "Monday, October 28, 2024 • 3:45 PM"
+            const options = { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            };
+            const dateStr = now.toLocaleDateString(undefined, options);
+            
+            // Format time with AM/PM
+            let hours = now.getHours();
+            let minutes = now.getMinutes();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // 0 should be 12
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            const timeStr = `${hours}:${minutes} ${ampm}`;
+            
+            const datetimeElement = document.getElementById('live-datetime');
+            if (datetimeElement) {
+                datetimeElement.textContent = `${dateStr} • ${timeStr}`;
+            }
+        };
+        
+        // Update immediately
+        updateClock();
+        
+        // Update every second
+        setInterval(updateClock, 1000);
+    }
+
+    initSankey() {
+        // Check if Google Charts is available
+        if (typeof google === 'undefined' || !google.charts) {
+            console.warn('Google Charts not loaded yet, Sankey feature disabled');
+            return;
+        }
+
+        // Load Google Charts
+        google.charts.load('current', {'packages':['sankey']});
+        
+        // Set up event listeners for Sankey
+        const sankeyToggleBtn = document.getElementById('sankey-toggle-btn');
+        const closeSankeyBtn = document.getElementById('close-sankey-btn');
+        const refreshSankeyBtn = document.getElementById('refresh-sankey-btn');
+        const sankeyDateFrom = document.getElementById('sankey-date-from');
+        const sankeyDateTo = document.getElementById('sankey-date-to');
+        const sankeyStatusCheckboxes = document.querySelectorAll('#sankey-status-filter input[type="checkbox"]');
+
+        if (sankeyToggleBtn) {
+            sankeyToggleBtn.addEventListener('click', () => this.toggleSankey());
+        }
+
+        if (closeSankeyBtn) {
+            closeSankeyBtn.addEventListener('click', () => this.hideSankey());
+        }
+
+        if (refreshSankeyBtn) {
+            refreshSankeyBtn.addEventListener('click', () => this.refreshSankeyData());
+        }
+
+        // Auto-update Sankey when filters change
+        if (sankeyDateFrom) {
+            sankeyDateFrom.addEventListener('change', () => this.renderSankeyWithFilters());
+        }
+
+        if (sankeyDateTo) {
+            sankeyDateTo.addEventListener('change', () => this.renderSankeyWithFilters());
+        }
+
+        sankeyStatusCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', () => this.renderSankeyWithFilters());
+        });
+    }
+
+    toggleSankey() {
+        const sankeyContainer = document.getElementById('sankey-container');
+        const isVisible = sankeyContainer && sankeyContainer.style.display === 'block';
+        
+        if (isVisible) {
+            this.hideSankey();
+        } else {
+            this.showSankey();
+        }
+    }
+
+    showSankey() {
+        const mainContainer = document.getElementById('main-container');
+        const sankeyContainer = document.getElementById('sankey-container');
+        const btn = document.getElementById('sankey-toggle-btn');
+        
+        if (!mainContainer || !sankeyContainer) {
+            console.error('Sankey containers not found');
+            return;
+        }
+        
+        mainContainer.style.display = 'none';
+        sankeyContainer.style.display = 'block';
+        
+        // Update button text
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-table"></i><span>Show Tracker</span>';
+        }
+        
+        this.renderSankeyWithFilters();
+    }
+
+    hideSankey() {
+        const mainContainer = document.getElementById('main-container');
+        const sankeyContainer = document.getElementById('sankey-container');
+        const btn = document.getElementById('sankey-toggle-btn');
+        
+        if (!mainContainer || !sankeyContainer) {
+            console.error('Sankey containers not found');
+            return;
+        }
+        
+        sankeyContainer.style.display = 'none';
+        mainContainer.style.display = 'block';
+        
+        // Update button text
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-chart-line"></i><span>Show Sankey</span>';
+        }
+    }
+
+    renderSankeyWithFilters() {
+        // Get filter values
+        const dateFrom = document.getElementById('sankey-date-from').value;
+        const dateTo = document.getElementById('sankey-date-to').value;
+        const selectedStatuses = Array.from(
+            document.querySelectorAll('#sankey-status-filter input[type="checkbox"]:checked')
+        ).map(cb => cb.value);
+
+        // Filter jobs
+        let filteredJobs = this.jobs.filter(job => {
+            // Date range filter
+            if (dateFrom && job.applied_date < dateFrom) return false;
+            if (dateTo && job.applied_date > dateTo) return false;
+            
+            // Status filter (check if job ever had any of the selected statuses)
+            if (selectedStatuses.length > 0) {
+                const hasStatus = selectedStatuses.includes(job.status) || 
+                    (job.status_history && job.status_history.some(h => selectedStatuses.includes(h.status)));
+                if (!hasStatus) return false;
+            }
+            
+            return true;
+        });
+
+        this.renderSankey(filteredJobs);
+    }
+
+    renderSankey(jobs) {
+        // Check if Google Charts is loaded
+        if (typeof google === 'undefined' || !google.visualization) {
+            console.error('Google Charts not loaded');
+            return;
+        }
+
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'From');
+        data.addColumn('string', 'To');
+        data.addColumn('number', 'Count');
+
+        // Define a logical order for statuses to prevent cycles
+        // Flow: Applied → Resume Screening → Interview → Offer/Rejected/Ended/Ghosted
+        const statusOrder = {
+            'Applied': 0,
+            'Resume Screening': 1,
+            'Interview': 2,
+            'Offer': 3,
+            'Rejected': 3,    // Terminal state (same level as Offer)
+            'Withdrawn': 3,   // Terminal state (same level as Offer)
+            'Ended': 3,       // Terminal state (same level as Offer)
+            'Ghosted': 3      // Terminal state (same level as Offer)
+        };
+        
+        // Aggregate all status paths - only count forward progressions to avoid cycles
+        const transitions = {};
+        
+        jobs.forEach(job => {
+            if (job.status_history && job.status_history.length > 0) {
+                // Build the complete path for this job
+                const statuses = [];
+                
+                job.status_history.forEach(entry => {
+                    const currentStatus = this.formatStatus(entry.status);
+                    // Skip "Saved" status - start from Applied
+                    if (currentStatus === 'Saved') return;
+                    
+                    // Only add if different from previous
+                    if (statuses.length === 0 || statuses[statuses.length - 1] !== currentStatus) {
+                        statuses.push(currentStatus);
+                    }
+                });
+                
+                // Add current status if different from last history entry
+                const currentStatus = this.formatStatus(job.status);
+                if (currentStatus !== 'Saved' && (statuses.length === 0 || statuses[statuses.length - 1] !== currentStatus)) {
+                    statuses.push(currentStatus);
+                }
+                
+                // Check if job is still in "Applied" status (no response = ghosted)
+                if (job.status === 'applied' && statuses[statuses.length - 1] === 'Applied') {
+                    statuses.push('Ghosted');
+                }
+                
+                // Only process if we have at least 2 statuses (need a transition)
+                if (statuses.length >= 2) {
+                    // Create transitions - ONLY forward progressions to avoid cycles
+                    // (Sankey diagrams cannot handle backwards flows)
+                    for (let i = 0; i < statuses.length - 1; i++) {
+                        const from = statuses[i];
+                        const to = statuses[i + 1];
+                        
+                        // Only count if it's a forward progression or to a terminal state
+                        const fromOrder = statusOrder[from] || 0;
+                        const toOrder = statusOrder[to] || 0;
+                        
+                        if (toOrder >= fromOrder || to === 'Ghosted') {
+                            const key = `${from} → ${to}`;
+                            transitions[key] = (transitions[key] || 0) + 1;
+                        }
+                    }
+                }
+            } else {
+                // No history - check if job is in "applied" status
+                const currentStatus = this.formatStatus(job.status);
+                if (currentStatus === 'Applied') {
+                    // Job is applied with no history = ghosted
+                    const key = 'Applied → Ghosted';
+                    transitions[key] = (transitions[key] || 0) + 1;
+                }
+            }
+        });
+
+        // Convert transitions to data array
+        const rows = Object.entries(transitions).map(([key, count]) => {
+            const [from, to] = key.split(' → ');
+            return [from, to, count];
+        });
+
+        if (rows.length === 0) {
+            // No valid transitions to display
+            document.getElementById('sankey-chart').innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center; height: 600px; flex-direction: column; gap: 1rem;">
+                    <i class="fas fa-chart-line" style="font-size: 4rem; color: #94a3b8;"></i>
+                    <p style="font-size: 1.25rem; color: #64748b;">No status transitions to display</p>
+                    <p style="font-size: 0.9rem; color: #94a3b8;">Try adjusting your filters or add more job applications with status changes</p>
+                </div>
+            `;
+            return;
+        }
+
+        data.addRows(rows);
+
+        const options = {
+            width: '100%',
+            height: 600,
+            sankey: {
+                node: {
+                    colors: ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6'],
+                    label: {
+                        fontName: 'Arial',
+                        fontSize: 14,
+                        color: '#333',
+                        bold: true
+                    },
+                    nodePadding: 20,
+                    width: 8
+                },
+                link: {
+                    colorMode: 'gradient',
+                    colors: ['#e0e7ff', '#f3e8ff', '#fce7f3', '#ffe4e6', '#fed7aa', '#d1fae5', '#cffafe', '#dbeafe']
+                }
+            }
+        };
+
+        const chart = new google.visualization.Sankey(document.getElementById('sankey-chart'));
+        chart.draw(data, options);
+        
+        // Add click event listener for interactivity
+        google.visualization.events.addListener(chart, 'select', () => {
+            const selection = chart.getSelection();
+            if (selection.length > 0) {
+                const selectedItem = selection[0];
+                
+                if (selectedItem.row !== undefined) {
+                    // Clicked on a link (transition between statuses)
+                    const rowData = data.getValue(selectedItem.row, 0); // from status
+                    const toStatus = data.getValue(selectedItem.row, 1); // to status
+                    const count = data.getValue(selectedItem.row, 2); // count
+                    
+                    console.log(`Clicked on transition: ${rowData} → ${toStatus} (${count} jobs)`);
+                    
+                    // Convert formatted status back to internal format
+                    const fromStatusInternal = this.reverseFormatStatus(rowData);
+                    const toStatusInternal = this.reverseFormatStatus(toStatus);
+                    
+                    // Filter jobs that have this specific transition
+                    this.filterByTransition(fromStatusInternal, toStatusInternal);
+                } else if (selectedItem.name !== undefined) {
+                    // Clicked on a node (status)
+                    const statusName = selectedItem.name;
+                    console.log(`Clicked on status: ${statusName}`);
+                    
+                    // Convert formatted status back to internal format
+                    const statusInternal = this.reverseFormatStatus(statusName);
+                    
+                    // Filter jobs with this status
+                    this.filterByStatus(statusInternal);
+                }
+            }
+        });
+    }
+
+    reverseFormatStatus(formattedStatus) {
+        // Convert formatted status back to internal format
+        const statusMap = {
+            'Saved': 'saved',
+            'Applied': 'applied',
+            'Resume Screening': 'resume_screening',
+            'Interview': 'interview',
+            'Offer': 'offer',
+            'Rejected': 'rejected',
+            'Withdrawn': 'withdrawn',
+            'Ended': 'ended'
+        };
+        return statusMap[formattedStatus] || formattedStatus.toLowerCase();
+    }
+
+    filterByTransition(fromStatus, toStatus) {
+        console.log(`Filtering by transition: ${fromStatus} → ${toStatus}`);
+        
+        // Find all jobs that have this specific transition in their history
+        const matchingJobs = this.jobs.filter(job => {
+            if (!job.status_history || job.status_history.length === 0) {
+                // Check if it's a simple Saved → current status transition
+                if (fromStatus === 'saved' && job.status === toStatus) {
+                    return true;
+                }
+                return false;
+            }
+            
+            // Build the status path for this job
+            const statuses = ['saved']; // Start with saved
+            job.status_history.forEach(entry => {
+                if (statuses[statuses.length - 1] !== entry.status) {
+                    statuses.push(entry.status);
+                }
+            });
+            
+            // Add current status if different
+            if (statuses[statuses.length - 1] !== job.status) {
+                statuses.push(job.status);
+            }
+            
+            // Check if this transition exists in the path
+            for (let i = 0; i < statuses.length - 1; i++) {
+                if (statuses[i] === fromStatus && statuses[i + 1] === toStatus) {
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+        
+        console.log(`Found ${matchingJobs.length} jobs with this transition`);
+        
+        // Apply the filter and switch to tracker view
+        this.filteredJobs = matchingJobs;
+        this.currentPage = 1;
+        this.hideSankey();
+        this.renderJobs();
+        this.updateStats();
+        
+        // Show a message
+        const message = `Showing ${matchingJobs.length} job(s) with transition: ${this.formatStatus(fromStatus)} → ${this.formatStatus(toStatus)}`;
+        this.showFilterMessage(message);
+    }
+
+    filterByStatus(status) {
+        console.log(`Filtering by status: ${status}`);
+        
+        // Find all jobs that either have this status or had it in their history
+        const matchingJobs = this.jobs.filter(job => {
+            // Check current status
+            if (job.status === status) return true;
+            
+            // Check status history
+            if (job.status_history && job.status_history.length > 0) {
+                return job.status_history.some(entry => entry.status === status);
+            }
+            
+            return false;
+        });
+        
+        console.log(`Found ${matchingJobs.length} jobs with status ${status}`);
+        
+        // Apply the filter and switch to tracker view
+        this.filteredJobs = matchingJobs;
+        this.currentPage = 1;
+        this.hideSankey();
+        this.renderJobs();
+        this.updateStats();
+        
+        // Show a message
+        const message = `Showing ${matchingJobs.length} job(s) with status: ${this.formatStatus(status)}`;
+        this.showFilterMessage(message);
+    }
+
+    showFilterMessage(message) {
+        // Create or update filter message
+        let messageDiv = document.getElementById('sankey-filter-message');
+        if (!messageDiv) {
+            messageDiv = document.createElement('div');
+            messageDiv.id = 'sankey-filter-message';
+            messageDiv.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #6366f1;
+                color: white;
+                padding: 1rem 1.5rem;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+                z-index: 1000;
+                font-size: 0.9rem;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+            `;
+            document.body.appendChild(messageDiv);
+        }
+        
+        messageDiv.innerHTML = `
+            <i class="fas fa-filter"></i>
+            <span>${message}</span>
+            <button onclick="this.parentElement.remove()" style="background: none; border: none; color: white; cursor: pointer; font-size: 1.2rem; margin-left: 0.5rem;">&times;</button>
+        `;
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (messageDiv && messageDiv.parentElement) {
+                messageDiv.remove();
+            }
+        }, 5000);
+    }
+
+    async refreshSankeyData() {
+        console.log('🔄 Refreshing Sankey data...');
+        
+        const refreshBtn = document.getElementById('refresh-sankey-btn');
+        const icon = refreshBtn?.querySelector('i');
+        
+        // Add spinning animation
+        if (refreshBtn) {
+            refreshBtn.classList.add('spinning');
+        }
+        
+        try {
+            // Fetch fresh data from Supabase
+            await this.loadJobs({ silent: true });
+            console.log('✅ Data loaded from Supabase');
+            
+            // Re-render the Sankey diagram with current filters
+            this.renderSankeyWithFilters();
+            console.log('✅ Sankey diagram refreshed');
+            
+            // Show success feedback
+            this.showFilterMessage('✅ Sankey data refreshed!');
+            
+        } catch (error) {
+            console.error('Error refreshing Sankey data:', error);
+            alert('Failed to refresh data: ' + error.message);
+        } finally {
+            // Remove spinning animation after a short delay
+            setTimeout(() => {
+                if (refreshBtn) {
+                    refreshBtn.classList.remove('spinning');
+                }
+            }, 600);
+        }
     }
 
     // Data Management
@@ -249,6 +795,16 @@ class SupabaseJobTracker {
                 this.selectAllJobs(selectAllCheckbox.checked);
             });
         }
+        
+        // Month selector for activity summary
+        const monthSelector = document.getElementById('month-selector');
+        if (monthSelector) {
+            monthSelector.addEventListener('change', (e) => {
+                const [year, month] = e.target.value.split('-');
+                this.selectedMonth = { year: parseInt(year), month: parseInt(month) };
+                this.updateActivitySummary();
+            });
+        }
 
     }
 
@@ -289,7 +845,9 @@ class SupabaseJobTracker {
                     // Jobs without applied_date don't match specific date filters
                     matchesDateRange = false;
                 } else {
-                    const jobDate = new Date(job.applied_date);
+                    // Parse date in local timezone (avoid UTC conversion)
+                    const parts = job.applied_date.split('-');
+                    const jobDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                     const now = new Date();
                     now.setHours(0, 0, 0, 0); // Reset to start of day
                     jobDate.setHours(0, 0, 0, 0); // Reset to start of day
@@ -300,7 +858,16 @@ class SupabaseJobTracker {
                             matchesDateRange = daysDiff === 0;
                             break;
                         case 'week':
-                            matchesDateRange = daysDiff <= 7;
+                            // This week: Monday to Sunday of current week
+                            const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+                            const mondayOffset = currentDay === 0 ? 6 : currentDay - 1; // Days since Monday
+                            const weekStart = new Date(now);
+                            weekStart.setDate(now.getDate() - mondayOffset);
+                            weekStart.setHours(0, 0, 0, 0);
+                            const weekEnd = new Date(weekStart);
+                            weekEnd.setDate(weekStart.getDate() + 6); // Sunday
+                            weekEnd.setHours(23, 59, 59, 999);
+                            matchesDateRange = jobDate >= weekStart && jobDate <= weekEnd;
                             break;
                         case 'month':
                             matchesDateRange = daysDiff <= 30;
@@ -332,7 +899,7 @@ class SupabaseJobTracker {
                 location: jobData.location || '',
                 job_id: jobData.jobId || '',
                 status: normalizedStatus,
-                applied_date: jobData.appliedDate || new Date().toISOString().split('T')[0],
+                applied_date: jobData.appliedDate || this.getTodayDate(),
                 url: jobData.url || '',
                 description: jobData.description || '',
                 notes: jobData.notes || '',
@@ -371,9 +938,53 @@ class SupabaseJobTracker {
             console.log('Job ID:', id);
             console.log('New status:', newStatus);
 
+            // Get current job data to access status history
+            const job = this.jobs.find(j => j.id === id);
+            if (!job) {
+                throw new Error('Job not found');
+            }
+
+            let updatedHistory;
+            
+            // If status is changed back to "saved", clear all history (reset)
+            if (newStatus === 'saved') {
+                console.log('⚠️ Status reset to Saved - clearing all history');
+                updatedHistory = [{
+                    status: 'saved',
+                    timestamp: new Date().toISOString(),
+                    date: new Date().toLocaleDateString('en-US', { 
+                        year: 'numeric', 
+                        month: 'short', 
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    })
+                }];
+            } else {
+                // Build status history entry
+                const statusHistoryEntry = {
+                    status: newStatus,
+                    timestamp: new Date().toISOString(),
+                    date: new Date().toLocaleDateString('en-US', { 
+                        year: 'numeric', 
+                        month: 'short', 
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    })
+                };
+
+                // Get existing history or initialize empty array
+                const currentHistory = job.status_history || [];
+                updatedHistory = [...currentHistory, statusHistoryEntry];
+            }
+
             const { data, error } = await this.supabase
                 .from('jobs')
-                .update({ status: newStatus })
+                .update({ 
+                    status: newStatus,
+                    status_history: updatedHistory
+                })
                 .eq('id', id)
                 .select()
                 .single();
@@ -392,7 +1003,7 @@ class SupabaseJobTracker {
             this.applyFilters();
             this.populateFilterOptions();
             
-            console.log('✅ Status updated successfully in Supabase');
+            console.log('✅ Status updated successfully in Supabase with history');
             return true;
         } catch (error) {
             console.error('Error updating job status:', error);
@@ -475,6 +1086,139 @@ class SupabaseJobTracker {
         }
     }
 
+    async deleteStatusHistoryEntry(jobId, entryIndex) {
+        try {
+            if (!confirm('Are you sure you want to delete this status change from history?')) {
+                return;
+            }
+
+            const job = this.jobs.find(j => j.id === jobId);
+            if (!job) {
+                throw new Error('Job not found');
+            }
+
+            console.log('=== DELETING STATUS HISTORY ENTRY ===');
+            console.log('Job ID:', jobId);
+            console.log('Entry index:', entryIndex);
+
+            // Get current status history
+            const currentHistory = job.status_history || [];
+            
+            // Remove the entry at the specified index
+            const updatedHistory = currentHistory.filter((_, index) => index !== entryIndex);
+
+            // Update in Supabase
+            const { data, error } = await this.supabase
+                .from('jobs')
+                .update({ status_history: updatedHistory })
+                .eq('id', jobId)
+                .select()
+                .single();
+
+            if (error) {
+                throw error;
+            }
+
+            // Update local data
+            const jobIndex = this.jobs.findIndex(j => j.id === jobId);
+            if (jobIndex !== -1) {
+                this.jobs[jobIndex] = data;
+            }
+
+            await this.saveJobs();
+            
+            // Re-open the modal with updated data
+            this.openAddJobModal(data);
+            
+            console.log('✅ Status history entry deleted successfully');
+        } catch (error) {
+            console.error('Error deleting status history entry:', error);
+            alert('Could not delete status history entry. Please try again.');
+        }
+    }
+
+    async addStatusToHistory(jobId) {
+        try {
+            const newStatusSelect = document.getElementById('new-status-select');
+            const newStatusDate = document.getElementById('new-status-date');
+            
+            if (!newStatusSelect || !newStatusDate) {
+                throw new Error('Form fields not found');
+            }
+            
+            const newStatus = newStatusSelect.value;
+            const newDateTime = newStatusDate.value;
+            
+            if (!newStatus || !newDateTime) {
+                alert('Please select both a status and date/time');
+                return;
+            }
+            
+            const job = this.jobs.find(j => j.id === jobId);
+            if (!job) {
+                throw new Error('Job not found');
+            }
+            
+            console.log('=== ADDING STATUS TO HISTORY ===');
+            console.log('Job ID:', jobId);
+            console.log('New status:', newStatus);
+            console.log('Date/Time:', newDateTime);
+            
+            // Create new status entry
+            const newEntry = {
+                status: newStatus,
+                timestamp: new Date(newDateTime).toISOString(),
+                date: new Date(newDateTime).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+            };
+            
+            // Get current history and add new entry
+            const currentHistory = job.status_history || [];
+            const updatedHistory = [...currentHistory, newEntry];
+            
+            // Sort by timestamp to keep chronological order
+            updatedHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Update in Supabase
+            const { data, error } = await this.supabase
+                .from('jobs')
+                .update({ 
+                    status: newStatus, // Also update the current status
+                    status_history: updatedHistory 
+                })
+                .eq('id', jobId)
+                .select()
+                .single();
+            
+            if (error) {
+                throw error;
+            }
+            
+            // Update local data
+            const jobIndex = this.jobs.findIndex(j => j.id === jobId);
+            if (jobIndex !== -1) {
+                this.jobs[jobIndex] = data;
+            }
+            
+            await this.saveJobs();
+            this.applyFilters();
+            this.renderJobs();
+            
+            // Re-open the modal with updated data
+            this.openAddJobModal(data);
+            
+            console.log('✅ Status added to history successfully');
+        } catch (error) {
+            console.error('Error adding status to history:', error);
+            alert('Could not add status to history. Please try again.');
+        }
+    }
+
     // Rendering (same as before)
     renderJobs() {
         const jobsContainer = document.getElementById('jobs-container');
@@ -544,6 +1288,9 @@ class SupabaseJobTracker {
                         <select class="status-dropdown" data-id="${job.id}">
                             ${statusOptions}
                         </select>
+                        <div class="status-date" data-id="${job.id}">
+                            ${this.getLastStatusChangeDate(job)}
+                        </div>
                     </td>
                     <td class="source-cell">
                         <select class="source-dropdown" data-id="${job.id}">
@@ -593,6 +1340,22 @@ class SupabaseJobTracker {
                 const success = await this.updateJobStatus(id, newStatus);
                 if (!success && job) {
                     target.value = previousStatus;
+                } else {
+                    // Update the date display below the dropdown (just date, no time)
+                    const statusDateElement = document.querySelector(`.status-date[data-id="${id}"]`);
+                    if (statusDateElement) {
+                        const now = new Date();
+                        const formattedDate = now.toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric',
+                            year: 'numeric'
+                        });
+                        statusDateElement.textContent = formattedDate;
+                        statusDateElement.style.color = '#10b981'; // Green color for fresh change
+                        setTimeout(() => {
+                            statusDateElement.style.color = ''; // Reset to default after 2s
+                        }, 2000);
+                    }
                 }
             });
         });
@@ -893,33 +1656,775 @@ class SupabaseJobTracker {
             document.getElementById('job-description').value = jobData.description || '';
             document.getElementById('job-notes').value = jobData.notes || '';
             document.getElementById('job-status').value = jobData.status || 'applied';
+            
+            // Show and populate status history
+            const historySection = document.getElementById('status-history-section');
+            const historyList = document.getElementById('status-history-list');
+            
+            // Build complete history array and store in temp
+            const completeHistory = [];
+            
+            // Always add the original "Saved" status with creation date
+            const createdDate = new Date(jobData.created_at || jobData.applied_date);
+            completeHistory.push({
+                status: 'saved',
+                timestamp: jobData.created_at || jobData.applied_date,
+                date: createdDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }),
+                isOriginal: true
+            });
+            
+            // Add all subsequent status changes from status_history
+            if (jobData.status_history && jobData.status_history.length > 0) {
+                jobData.status_history.forEach(entry => {
+                    // Skip if it's the same as the original saved status
+                    if (entry.status !== 'saved' || new Date(entry.timestamp).getTime() !== createdDate.getTime()) {
+                        const date = new Date(entry.timestamp);
+                        completeHistory.push({
+                            status: entry.status,
+                            timestamp: entry.timestamp,
+                            date: date.toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            }),
+                            isOriginal: false
+                        });
+                    }
+                });
+            }
+            
+            // Store in temp history (reversed for most recent first display)
+            this.tempStatusHistory = [...completeHistory].reverse();
+            
+            // Show history section if there's any history
+            if (completeHistory.length > 0) {
+                historySection.style.display = 'block';
+                this.renderStatusHistory();
+                
+                // Add event listener for "Add Status" button
+                const addStatusBtn = document.getElementById('add-status-btn');
+                if (addStatusBtn) {
+                    addStatusBtn.onclick = () => {
+                        this.addStatusToTempHistory();
+                    };
+                }
+                
+                // Set default datetime to now
+                const newStatusDate = document.getElementById('new-status-date');
+                if (newStatusDate) {
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    newStatusDate.value = `${year}-${month}-${day}T${hours}:${minutes}`;
+                }
+            } else {
+                historySection.style.display = 'none';
+            }
         } else {
             // Clear form
             document.getElementById('add-job-form').reset();
+            document.getElementById('status-history-section').style.display = 'none';
         }
         
         document.getElementById('add-job-modal').style.display = 'flex';
     }
 
-    // Statistics
-    updateStats() {
-        // Stats should show ALL jobs, not filtered jobs
-        const totalApplications = this.jobs.length;
-        const companies = new Set(this.jobs.map(job => job.company).filter(Boolean)).size;
-        const locations = new Set(this.jobs.map(job => job.location).filter(Boolean)).size;
+    renderStatusHistory() {
+        const historyList = document.getElementById('status-history-list');
+        if (!historyList) return;
         
-        // Calculate streak
+        historyList.innerHTML = this.tempStatusHistory
+            .map((entry, index) => {
+                const originalBadge = entry.isOriginal ? ' <span style="font-size: 0.7rem; color: #10b981; font-weight: 600;">(Original)</span>' : '';
+                const deleteBtn = !entry.isOriginal ? `<button class="delete-status-btn-temp" data-index="${index}" title="Delete this status change"><i class="fas fa-times"></i></button>` : '';
+                const dragHandle = `<i class="fas fa-grip-vertical drag-handle"></i>`;
+                return `
+                    <div class="status-history-item" draggable="${!entry.isOriginal}" data-index="${index}">
+                        ${!entry.isOriginal ? dragHandle : ''}
+                        <span class="status-history-status">${this.formatStatus(entry.status)}${originalBadge}</span>
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <span class="status-history-date">${entry.date}</span>
+                            ${deleteBtn}
+                        </div>
+                    </div>
+                `;
+            })
+            .join('');
+        
+        // Add delete event listeners
+        document.querySelectorAll('.delete-status-btn-temp').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const index = parseInt(btn.dataset.index);
+                this.deleteFromTempHistory(index);
+            });
+        });
+        
+        // Add drag-and-drop listeners
+        this.setupDragAndDrop();
+    }
+
+    setupDragAndDrop() {
+        const items = document.querySelectorAll('.status-history-item[draggable="true"]');
+        
+        items.forEach(item => {
+            item.addEventListener('dragstart', (e) => {
+                e.target.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/html', e.target.innerHTML);
+            });
+            
+            item.addEventListener('dragend', (e) => {
+                e.target.classList.remove('dragging');
+            });
+            
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                
+                const dragging = document.querySelector('.dragging');
+                if (dragging && dragging !== e.target) {
+                    const allItems = [...document.querySelectorAll('.status-history-item')];
+                    const draggingIndex = allItems.indexOf(dragging);
+                    const targetIndex = allItems.indexOf(e.target);
+                    
+                    if (draggingIndex > targetIndex) {
+                        e.target.parentNode.insertBefore(dragging, e.target);
+                    } else {
+                        e.target.parentNode.insertBefore(dragging, e.target.nextSibling);
+                    }
+                }
+            });
+            
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Reorder temp history based on new DOM order
+                const items = document.querySelectorAll('.status-history-item');
+                this.tempStatusHistory = Array.from(items).map((item, index) => {
+                    const originalIndex = parseInt(item.dataset.index);
+                    item.dataset.index = index;
+                    return this.tempStatusHistory[originalIndex];
+                });
+                
+                this.renderStatusHistory();
+            });
+        });
+    }
+
+    addStatusToTempHistory() {
+        const newStatusSelect = document.getElementById('new-status-select');
+        const newStatusDate = document.getElementById('new-status-date');
+        
+        if (!newStatusSelect || !newStatusDate) return;
+        
+        const newStatus = newStatusSelect.value;
+        const newDateTime = newStatusDate.value;
+        
+        if (!newStatus || !newDateTime) {
+            alert('Please select both a status and date/time');
+            return;
+        }
+        
+        const newEntry = {
+            status: newStatus,
+            timestamp: new Date(newDateTime).toISOString(),
+            date: new Date(newDateTime).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
+            isOriginal: false
+        };
+        
+        this.tempStatusHistory.push(newEntry);
+        
+        // Sort by timestamp (most recent first)
+        this.tempStatusHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        this.renderStatusHistory();
+        
+        // Reset datetime to now
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        newStatusDate.value = `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
+    deleteFromTempHistory(index) {
+        if (confirm('Delete this status change?')) {
+            this.tempStatusHistory.splice(index, 1);
+            this.renderStatusHistory();
+        }
+    }
+
+    // Statistics
+    updateStats(skipActivityUpdate = false) {
+        // Stats should show FILTERED jobs (respects current filters)
+        const totalApplications = this.filteredJobs.length;
+        const companies = new Set(this.filteredJobs.map(job => job.company).filter(Boolean)).size;
+        const locations = new Set(this.filteredJobs.map(job => job.location).filter(Boolean)).size;
+        
+        // Calculate streak based on all jobs (not filtered)
         const streak = this.calculateStreak();
         
         document.getElementById('total-applications').textContent = totalApplications;
         document.getElementById('total-companies').textContent = companies;
         document.getElementById('total-locations').textContent = locations;
         document.getElementById('current-streak').textContent = streak;
+        
+        // Update insights metrics (always uses all jobs)
+        this.updateInsights();
+        
+        // Only update activity summary if not skipped (e.g., when clicking on a day)
+        if (!skipActivityUpdate) {
+            // Populate month selector
+            this.populateMonthSelector();
+            
+            // Update activity summary cards
+            this.updateActivitySummary();
+        }
+    }
+    
+    showWeekBreakdownByDates(weekStartDate, weekEndDate, weekNumber = null) {
+        // Use the provided Monday-Sunday week dates
+        
+        // Update title to show which week is selected
+        const weekTitle = document.querySelector('.activity-card:nth-child(2) .activity-title');
+        if (weekTitle && weekNumber !== null) {
+            const formatWeekDate = (date) => {
+                const month = date.toLocaleDateString(undefined, { month: 'short' });
+                const day = date.getDate();
+                return `${month} ${day}`;
+            };
+            const weekRangeText = `${formatWeekDate(weekStartDate)} - ${formatWeekDate(weekEndDate)}`;
+            weekTitle.innerHTML = `Week ${weekNumber} <span class="week-range">${weekRangeText}</span>`;
+        }
+        
+        // Remove 'selected' class from all week items and day items
+        document.querySelectorAll('.week-item').forEach(item => item.classList.remove('selected'));
+        document.querySelectorAll('.day-item').forEach(item => item.classList.remove('selected'));
+        
+        // Add 'selected' class to the clicked week
+        if (weekNumber !== null) {
+            const selectedWeekItem = document.getElementById(`week-${weekNumber}`)?.closest('.week-item');
+            if (selectedWeekItem) {
+                selectedWeekItem.classList.add('selected');
+            }
+        }
+        
+        // Calculate day counts for this specific week
+        const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const dayCounts = {
+            'mon': 0, 'tue': 0, 'wed': 0, 'thu': 0, 
+            'fri': 0, 'sat': 0, 'sun': 0
+        };
+        let weekTotal = 0;
+        
+        this.jobs.forEach(job => {
+            if (!job.applied_date) return;
+            if (job.status === 'saved') return; // Exclude saved jobs from counts
+            
+            const parts = job.applied_date.split('-');
+            const jobDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            
+            if (jobDate >= weekStartDate && jobDate <= weekEndDate) {
+                weekTotal++;
+                const dayOfWeek = jobDate.getDay();
+                const dayKey = dayMap[dayOfWeek];
+                
+                // Debug logging
+                console.log(`📅 Job date: ${job.applied_date} -> ${jobDate.toDateString()} -> Day ${dayOfWeek} (${dayKey})`);
+                
+                dayCounts[dayKey]++;
+            }
+        });
+        
+        // Update the "This Week" card with this week's data
+        document.getElementById('week-total').textContent = `${weekTotal} application${weekTotal !== 1 ? 's' : ''}`;
+        
+        // Update week range
+        const formatWeekDate = (date) => {
+            const month = date.toLocaleDateString(undefined, { month: 'short' });
+            const day = date.getDate();
+            return `${month} ${day}`;
+        };
+        
+        const weekRangeText = `(${formatWeekDate(weekStartDate)} - ${formatWeekDate(weekEndDate)})`;
+        const weekRangeElement = document.getElementById('week-range');
+        if (weekRangeElement) {
+            weekRangeElement.textContent = weekRangeText;
+        }
+        
+        // Update each day's count
+        Object.keys(dayCounts).forEach(day => {
+            const element = document.getElementById(`day-${day}`);
+            if (element) {
+                element.textContent = dayCounts[day];
+                
+                // Remove any existing active class (since this is a custom week view)
+                element.classList.remove('active');
+                
+                // Make clickable - add pointer cursor
+                const dayItem = element.closest('.day-item');
+                if (dayItem) {
+                    dayItem.style.cursor = dayCounts[day] > 0 ? 'pointer' : 'default';
+                    
+                    // Remove old event listeners by cloning
+                    const newDayItem = dayItem.cloneNode(true);
+                    dayItem.parentNode.replaceChild(newDayItem, dayItem);
+                    
+                    // Add click handler to filter by this day
+                    if (dayCounts[day] > 0) {
+                        newDayItem.addEventListener('click', () => {
+                            this.filterByWeekDay(day, dayMap, weekStartDate);
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    filterByWeekDay(dayKey, dayMap, weekStart) {
+        // Convert day key to day number (0-6)
+        const dayNumber = dayMap.indexOf(dayKey);
+        
+        // Calculate the date for this day
+        const targetDate = new Date(weekStart);
+        const mondayDayNumber = 1; // Monday is day 1
+        
+        // Calculate days from Monday
+        let daysFromMonday;
+        if (dayNumber === 0) { // Sunday
+            daysFromMonday = 6;
+        } else {
+            daysFromMonday = dayNumber - 1;
+        }
+        
+        targetDate.setDate(weekStart.getDate() + daysFromMonday);
+        targetDate.setHours(0, 0, 0, 0);
+        
+        // Format date for filtering
+        const year = targetDate.getFullYear();
+        const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const day = String(targetDate.getDate()).padStart(2, '0');
+        const dateString = `${year}-${month}-${day}`;
+        
+        // Filter jobs by this specific date
+        this.filteredJobs = this.jobs.filter(job => job.applied_date === dateString);
+        this.currentPage = 1;
+        this.renderJobs();
+        this.updateStats(true); // Skip activity update to keep week/month cards unchanged
+        
+        // Remove 'selected' class from all day items
+        document.querySelectorAll('.day-item').forEach(item => item.classList.remove('selected'));
+        
+        // Add 'selected' class to the clicked day
+        const selectedDayItem = document.getElementById(`day-${dayKey}`)?.closest('.day-item');
+        if (selectedDayItem) {
+            selectedDayItem.classList.add('selected');
+        }
+    }
+
+    populateMonthSelector() {
+        const monthSelector = document.getElementById('month-selector');
+        if (!monthSelector) return;
+        
+        // Get all unique months from jobs
+        const monthsSet = new Set();
+        this.jobs.forEach(job => {
+            if (job.applied_date) {
+                const parts = job.applied_date.split('-');
+                const year = parseInt(parts[0]);
+                const month = parseInt(parts[1]) - 1; // 0-indexed
+                monthsSet.add(`${year}-${month}`);
+            }
+        });
+        
+        // Convert to array and sort (newest first)
+        const months = Array.from(monthsSet)
+            .map(key => {
+                const [year, month] = key.split('-');
+                return { year: parseInt(year), month: parseInt(month) };
+            })
+            .sort((a, b) => {
+                if (a.year !== b.year) return b.year - a.year;
+                return b.month - a.month;
+            });
+        
+        // Populate dropdown
+        monthSelector.innerHTML = '';
+        months.forEach(({ year, month }) => {
+            const option = document.createElement('option');
+            const date = new Date(year, month, 1);
+            const monthName = date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+            option.value = `${year}-${month}`;
+            option.textContent = monthName;
+            
+            // Select current month by default
+            const now = new Date();
+            if (year === now.getFullYear() && month === now.getMonth()) {
+                option.selected = true;
+                this.selectedMonth = { year, month };
+            }
+            
+            monthSelector.appendChild(option);
+        });
+        
+        // If no months or current month not in data, select first option
+        if (months.length > 0 && !this.selectedMonth) {
+            this.selectedMonth = { year: months[0].year, month: months[0].month };
+            monthSelector.selectedIndex = 0;
+        }
+    }
+
+    updateActivitySummary() {
+        // This Week breakdown
+        const now = new Date();
+        const currentDay = now.getDay();
+        const mondayOffset = currentDay === 0 ? 6 : currentDay - 1;
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - mondayOffset);
+        weekStart.setHours(0, 0, 0, 0);
+        
+        const dayCounts = { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 };
+        const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        
+        let weekTotal = 0;
+        
+        this.jobs.forEach(job => {
+            if (!job.applied_date) return;
+            if (job.status === 'saved') return; // Exclude saved jobs from counts
+            
+            const parts = job.applied_date.split('-');
+            const jobDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            jobDate.setHours(0, 0, 0, 0);
+            
+            // Check if job is in this week
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 6);
+            weekEnd.setHours(23, 59, 59, 999);
+            
+            if (jobDate >= weekStart && jobDate <= weekEnd) {
+                const dayOfWeek = jobDate.getDay();
+                const dayKey = dayMap[dayOfWeek];
+                dayCounts[dayKey]++;
+                weekTotal++;
+            }
+        });
+        
+        // Format week range
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const formatWeekDate = (date) => {
+            const month = date.toLocaleDateString(undefined, { month: 'short' });
+            const day = date.getDate();
+            return `${month} ${day}`;
+        };
+        
+        const weekRangeText = `(${formatWeekDate(weekStart)} - ${formatWeekDate(weekEnd)})`;
+        const weekRangeElement = document.getElementById('week-range');
+        if (weekRangeElement) {
+            weekRangeElement.textContent = weekRangeText;
+        }
+        
+        // Update week display
+        document.getElementById('week-total').textContent = `${weekTotal} application${weekTotal !== 1 ? 's' : ''}`;
+        Object.keys(dayCounts).forEach(day => {
+            const element = document.getElementById(`day-${day}`);
+            if (element) {
+                element.textContent = dayCounts[day];
+                
+                // Highlight today with 'selected' class on initial load
+                const todayKey = dayMap[currentDay];
+                const dayItem = element.closest('.day-item');
+                if (dayItem && day === todayKey) {
+                    dayItem.classList.add('selected');
+                }
+                
+                // Make clickable - add pointer cursor
+                if (dayItem) {
+                    dayItem.style.cursor = dayCounts[day] > 0 ? 'pointer' : 'default';
+                    
+                    // Remove old event listeners by cloning
+                    const newDayItem = dayItem.cloneNode(true);
+                    dayItem.parentNode.replaceChild(newDayItem, dayItem);
+                    
+                    // Add click handler to filter by this day
+                    if (dayCounts[day] > 0) {
+                        newDayItem.addEventListener('click', () => {
+                            this.filterByWeekDay(day, dayMap, weekStart);
+                        });
+                    }
+                }
+            }
+        });
+        
+        // This Month breakdown by weeks (Monday-Sunday calendar weeks)
+        // Use selected month or default to current month
+        const selectedDate = this.selectedMonth ? new Date(this.selectedMonth.year, this.selectedMonth.month, 1) : now;
+        const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+        const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+        
+        // Calculate Monday-Sunday weeks that overlap with this month
+        const weekStarts = [];
+        
+        // Find the first Monday of or before the month start
+        let firstMonday = new Date(monthStart);
+        const firstDayOfWeek = monthStart.getDay();
+        const daysToMonday = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+        firstMonday.setDate(monthStart.getDate() - daysToMonday);
+        
+        // Generate up to 6 Monday-Sunday weeks that might overlap with this month
+        for (let i = 0; i < 6; i++) {
+            const weekStart = new Date(firstMonday);
+            weekStart.setDate(firstMonday.getDate() + (i * 7));
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 6);
+            
+            // Only include weeks that have at least one day in the selected month
+            if (weekStart <= monthEnd && weekEnd >= monthStart) {
+                weekStarts.push({ start: weekStart, end: weekEnd });
+            }
+        }
+        
+        const weekCounts = new Array(weekStarts.length).fill(0);
+        let monthTotal = 0;
+        
+        this.jobs.forEach(job => {
+            if (!job.applied_date) return;
+            if (job.status === 'saved') return; // Exclude saved jobs from counts
+            
+            const parts = job.applied_date.split('-');
+            const jobDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            
+            // Check if job is in this month
+            if (jobDate >= monthStart && jobDate <= monthEnd) {
+                monthTotal++;
+                
+                // Find which week this job belongs to
+                for (let i = 0; i < weekStarts.length; i++) {
+                    if (jobDate >= weekStarts[i].start && jobDate <= weekStarts[i].end) {
+                        weekCounts[i]++;
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Update month display
+        document.getElementById('month-total').textContent = `${monthTotal} application${monthTotal !== 1 ? 's' : ''}`;
+        
+        // Hide extra week cards if less than 5 weeks
+        for (let i = 1; i <= 5; i++) {
+            const element = document.getElementById(`week-${i}`);
+            if (element) {
+                const weekItem = element.closest('.week-item');
+                if (i <= weekStarts.length) {
+                    // Show this week
+                    if (weekItem) weekItem.style.display = 'flex';
+                    element.textContent = weekCounts[i - 1];
+                    
+                    // Make week items clickable
+                    if (weekItem) {
+                        weekItem.style.cursor = weekCounts[i - 1] > 0 ? 'pointer' : 'default';
+                        
+                        // Remove old event listeners by cloning
+                        const newWeekItem = weekItem.cloneNode(true);
+                        weekItem.parentNode.replaceChild(newWeekItem, weekItem);
+                        
+                        // Highlight the week that contains today (only if viewing current month)
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const weekData = weekStarts[i - 1];
+                        const isCurrentMonth = !this.selectedMonth || 
+                            (this.selectedMonth.year === today.getFullYear() && this.selectedMonth.month === today.getMonth());
+                        
+                        if (isCurrentMonth && today >= weekData.start && today <= weekData.end) {
+                            newWeekItem.classList.add('selected');
+                        }
+                        
+                        // Add click handler to show week breakdown
+                        if (weekCounts[i - 1] > 0) {
+                            const weekNumber = i;
+                            newWeekItem.addEventListener('click', () => {
+                                this.showWeekBreakdownByDates(weekData.start, weekData.end, weekNumber);
+                            });
+                        }
+                    }
+                } else {
+                    // Hide this week card
+                    if (weekItem) weekItem.style.display = 'none';
+                }
+            }
+        }
+    }
+    
+    updateInsights() {
+        const appliedJobs = this.jobs.filter(j => j.status !== 'saved');
+        
+        console.log('📊 Calculating Insights:', {
+            totalJobs: this.jobs.length,
+            appliedJobs: appliedJobs.length
+        });
+        
+        // Performance Metrics
+        // Ghost Rate: % of applied jobs with no response (still in "applied" status)
+        const ghostedJobs = appliedJobs.filter(j => j.status === 'applied');
+        const ghostRate = appliedJobs.length > 0 ? ((ghostedJobs.length / appliedJobs.length) * 100).toFixed(1) : 0;
+        document.getElementById('ghost-rate').textContent = `${ghostRate}%`;
+        
+        console.log('👻 Ghost Rate:', { ghosted: ghostedJobs.length, total: appliedJobs.length, rate: ghostRate + '%' });
+        
+        // Response Time: Average days between applied and next status
+        let totalResponseDays = 0;
+        let responseCount = 0;
+        
+        appliedJobs.forEach(job => {
+            if (!job.status_history || job.status_history.length === 0) return;
+            
+            // Find applied entry in history (chronologically first after any saved entries)
+            const appliedIndex = job.status_history.findIndex(h => h.status === 'applied');
+            
+            if (appliedIndex !== -1 && appliedIndex < job.status_history.length - 1) {
+                // Find the next non-applied, non-saved status after applied
+                for (let i = appliedIndex + 1; i < job.status_history.length; i++) {
+                    const nextEntry = job.status_history[i];
+                    if (nextEntry.status !== 'applied' && nextEntry.status !== 'saved') {
+                        const appliedDate = new Date(job.status_history[appliedIndex].timestamp);
+                        const responseDate = new Date(nextEntry.timestamp);
+                        const days = Math.floor((responseDate - appliedDate) / (1000 * 60 * 60 * 24));
+                        
+                        if (days >= 0) {
+                            totalResponseDays += days;
+                            responseCount++;
+                        }
+                        break; // Only count first response
+                    }
+                }
+            }
+        });
+        
+        const avgResponseTime = responseCount > 0 ? (totalResponseDays / responseCount).toFixed(1) : 0;
+        document.getElementById('response-time').textContent = `${avgResponseTime} days`;
+        
+        console.log('⏱️ Response Time:', { totalDays: totalResponseDays, count: responseCount, avg: avgResponseTime + ' days' });
+        
+        // Longest Waiting Application (only count jobs still waiting - in "applied" status)
+        const now = new Date();
+        let longestWait = 0;
+        const waitingJobs = appliedJobs.filter(j => j.status === 'applied');
+        
+        waitingJobs.forEach(job => {
+            if (job.applied_date) {
+                const daysSinceApplied = Math.floor((now - new Date(job.applied_date)) / (1000 * 60 * 60 * 24));
+                if (daysSinceApplied > longestWait) {
+                    longestWait = daysSinceApplied;
+                }
+            }
+        });
+        document.getElementById('longest-waiting').textContent = `${longestWait} days`;
+        
+        console.log('⏳ Longest Waiting:', { days: longestWait, waitingJobs: waitingJobs.length });
+        
+        // Volume Metrics (exclude saved jobs)
+        const activeJobs = this.jobs.filter(j => j.status !== 'saved');
+        document.getElementById('total-apps-insight').textContent = activeJobs.length;
+        
+        // Most Active Day
+        const dayCount = {};
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        
+        this.jobs.forEach(job => {
+            if (job.applied_date && job.status !== 'saved') { // Exclude saved jobs from counts
+                const day = new Date(job.applied_date).getDay();
+                dayCount[day] = (dayCount[day] || 0) + 1;
+            }
+        });
+        
+        let mostActiveDay = 0;
+        let maxCount = 0;
+        Object.entries(dayCount).forEach(([day, count]) => {
+            if (count > maxCount) {
+                maxCount = count;
+                mostActiveDay = parseInt(day);
+            }
+        });
+        
+        const activeDay = maxCount > 0 ? dayNames[mostActiveDay] : '-';
+        document.querySelector('#most-active-day .day-name').textContent = activeDay;
+        document.querySelector('#most-active-day .day-count').textContent = `${maxCount} apps`;
+        
+        console.log('📅 Most Active Day:', { day: activeDay, count: maxCount, breakdown: dayCount });
+        
+        // Application Rate (exclude saved jobs)
+        const sortedJobs = [...this.jobs].filter(j => j.applied_date && j.status !== 'saved').sort((a, b) => new Date(a.applied_date) - new Date(b.applied_date));
+        
+        if (sortedJobs.length > 1) {
+            const firstDate = new Date(sortedJobs[0].applied_date);
+            const lastDate = new Date(sortedJobs[sortedJobs.length - 1].applied_date);
+            const daysDiff = Math.max(1, Math.floor((lastDate - firstDate) / (1000 * 60 * 60 * 24)) + 1); // +1 to include both days
+            
+            const daily = (sortedJobs.length / daysDiff).toFixed(1);
+            const weekly = (sortedJobs.length / (daysDiff / 7)).toFixed(1);
+            const monthly = (sortedJobs.length / (daysDiff / 30)).toFixed(1);
+            const yearly = (sortedJobs.length / (daysDiff / 365)).toFixed(0);
+            
+            document.getElementById('rate-daily').textContent = daily;
+            document.getElementById('rate-weekly').textContent = weekly;
+            document.getElementById('rate-monthly').textContent = monthly;
+            document.getElementById('rate-yearly').textContent = yearly;
+            
+            console.log('📊 Application Rate:', { 
+                dateRange: `${sortedJobs[0].applied_date} to ${sortedJobs[sortedJobs.length - 1].applied_date}`,
+                totalDays: daysDiff, 
+                total: sortedJobs.length,
+                rates: { daily, weekly, monthly, yearly }
+            });
+        } else {
+            document.getElementById('rate-daily').textContent = '0';
+            document.getElementById('rate-weekly').textContent = '0';
+            document.getElementById('rate-monthly').textContent = '0';
+            document.getElementById('rate-yearly').textContent = '0';
+            
+            console.log('📊 Application Rate: Not enough data (need at least 2 jobs with dates)');
+        }
+        
+        // Conversion Funnel (exclude saved jobs)
+        const screeningJobs = this.jobs.filter(j => j.status !== 'saved' && (j.status === 'resume_screening' || (j.status_history && j.status_history.some(h => h.status === 'resume_screening'))));
+        const interviewJobs = this.jobs.filter(j => j.status !== 'saved' && (j.status === 'interview' || (j.status_history && j.status_history.some(h => h.status === 'interview'))));
+        const offerJobs = this.jobs.filter(j => j.status !== 'saved' && j.status === 'offer');
+        
+        const convScreening = appliedJobs.length > 0 ? ((screeningJobs.length / appliedJobs.length) * 100).toFixed(0) : 0;
+        const convInterview = screeningJobs.length > 0 ? ((interviewJobs.length / screeningJobs.length) * 100).toFixed(0) : 0;
+        const convOffer = interviewJobs.length > 0 ? ((offerJobs.length / interviewJobs.length) * 100).toFixed(0) : 0;
+        
+        document.getElementById('conv-screening').textContent = `${convScreening}%`;
+        document.getElementById('conv-interview').textContent = `${convInterview}%`;
+        document.getElementById('conv-offer').textContent = `${convOffer}%`;
     }
     
     calculateStreak() {
         const sortedJobs = [...this.jobs]
-            .filter(job => job.applied_date)
+            .filter(job => job.applied_date && job.status !== 'saved') // Exclude saved jobs from streak
             .sort((a, b) => new Date(b.applied_date) - new Date(a.applied_date));
         
         if (sortedJobs.length === 0) return 0;
@@ -1074,7 +2579,7 @@ function importCSV() {
                             location: job.location || '',
                             url: job.url || '',
                             status: job.status || 'saved',
-                            applied_date: job.applied_date || new Date().toISOString().split('T')[0],
+                            applied_date: job.applied_date || this.getTodayDate(),
                             description: job.description || '',
                             notes: job.notes || '',
                             job_id: '',
@@ -1339,6 +2844,21 @@ function exportAll() {
     }
 }
 
+function toggleInsights() {
+    const insightsSection = document.getElementById('insights-section');
+    const insightsBtn = document.getElementById('insights-toggle-btn');
+    
+    if (insightsSection.style.display === 'none') {
+        insightsSection.style.display = 'block';
+        insightsBtn.innerHTML = '<i class="fas fa-chart-bar"></i><span>Hide Insights</span>';
+        console.log('✅ Insights shown');
+    } else {
+        insightsSection.style.display = 'none';
+        insightsBtn.innerHTML = '<i class="fas fa-chart-bar"></i><span>Show Insights</span>';
+        console.log('✅ Insights hidden');
+    }
+}
+
 async function refreshData() {
     console.log('🔄 Refresh Data button clicked!');
     console.log('jobTracker exists?', !!jobTracker);
@@ -1380,7 +2900,7 @@ async function refreshData() {
             // Show success feedback
             if (refreshBtn) {
                 const originalText = refreshBtn.innerHTML;
-                refreshBtn.innerHTML = '<i class="fas fa-check"></i> Refreshed!';
+                refreshBtn.innerHTML = '<i class="fas fa-check"></i>';
                 setTimeout(() => {
                     refreshBtn.innerHTML = originalText;
                 }, 2000);
@@ -1460,10 +2980,26 @@ async function saveJob() {
         // UPDATE EXISTING JOB
         console.log('Updating existing job with ID:', jobTracker.editingJobId);
         
+        // Convert temp history to proper format (remove isOriginal, reverse for chronological order)
+        const statusHistory = jobTracker.tempStatusHistory
+            .filter(entry => !entry.isOriginal) // Remove original entry
+            .reverse() // Convert from newest-first to oldest-first
+            .map(entry => ({
+                status: entry.status,
+                timestamp: entry.timestamp,
+                date: entry.date
+            }));
+        
+        // Add status_history to the update
+        const updateData = {
+            ...formData,
+            status_history: statusHistory
+        };
+        
         try {
             const { data, error } = await jobTracker.supabase
                 .from('jobs')
-                .update(formData)
+                .update(updateData)
                 .eq('id', jobTracker.editingJobId)
                 .select()
                 .single();
@@ -1483,6 +3019,7 @@ async function saveJob() {
             }
             
             jobTracker.applyFilters();
+            jobTracker.renderJobs();
             alert('✅ Job updated successfully!');
         } catch (err) {
             console.error('Exception updating job:', err);
@@ -1500,7 +3037,7 @@ async function saveJob() {
                 location: formData.location || '',
                 job_id: '',
                 status: formData.status || 'saved',
-                applied_date: new Date().toISOString().split('T')[0],
+                applied_date: jobTracker.getTodayDate(),
                 url: formData.url || '',
                 description: formData.description || '',
                 notes: formData.notes || '',
@@ -1649,6 +3186,13 @@ function setupEventListeners() {
         trackerTab.addEventListener('click', showTracker);
     }
     
+    // Insights toggle button
+    const insightsToggleBtn = document.getElementById('insights-toggle-btn');
+    if (insightsToggleBtn) {
+        insightsToggleBtn.addEventListener('click', toggleInsights);
+        console.log('✅ Insights toggle button event listener attached');
+    }
+    
     // Action buttons
     const refreshBtn = document.getElementById('refresh-btn');
     console.log('refresh-btn exists?', !!refreshBtn);
@@ -1771,3 +3315,4 @@ function setupEventListeners() {
         saveComment();
     });
 }
+

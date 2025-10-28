@@ -396,6 +396,19 @@ async function saveRow(payload) {
   const todayDate = `${year}-${month}-${day}`;
   
   // Prepare Supabase payload
+  // Initialize status history with the first status
+  const initialStatusHistory = [{
+    status: payload.status || 'saved',
+    timestamp: new Date().toISOString(),
+    date: new Date().toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }];
+
   const supabasePayload = {
     title: payload.title || '',
     company: payload.company || '',
@@ -407,7 +420,8 @@ async function saveRow(payload) {
     description: payload.description || '',
     notes: '',
     comments: '',
-    source: payload.source || 'URL'
+    source: payload.source || 'URL',
+    status_history: initialStatusHistory
   };
   
   console.log('Supabase payload:', supabasePayload);
