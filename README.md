@@ -1,66 +1,7 @@
 # Job Tracker (Chrome Extension)
 
-Concise setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
+ Setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
 
-## ✨ Features
-
-### 🔍 **Automatic Job Scraping**
-- **One-click save** from any job posting page
-- Automatically extracts:
-  - Job title
-  - Company name
-  - Location
-  - Job description
-  - Job ID (LinkedIn, Indeed, Handshake, etc.)
-  - Source (auto-detected)
-- Works on major job platforms:
-  - LinkedIn
-  - Indeed
-  - Handshake
-  - Microsoft Careers
-  - And most job boards with structured data
-
-### 📊 **Smart Dashboard**
-- **Real-time stats:**
-  - Total applications
-  - Applications this week
-  - Current streak
-  - Interview count
-- **Advanced filtering:**
-  - Search by title, company, or location
-  - Filter by status (Saved, Applied, Interview, Offer, etc.)
-  - Filter by company
-  - Filter by location
-  - Date range filters
-- **Status management:**
-  - Saved
-  - Applied
-  - Resume Screening
-  - Interview
-  - Offer
-  - Rejected
-  - Withdrawn
-  - Ended
-- **Pagination:** 50 entries per page
-- **Sortable columns:** Always shows most recent first
-- **Bulk actions:** Delete multiple entries
-
-### UI**
-- Modern, clean design
-- Floating button that follows you on job pages
-- Skeleton loading animations
-- Responsive layout
-- Smooth transitions
-
-### 💾 **Data Management**
-- **Supabase backend:** Secure cloud storage
-- **Local backup:** Chrome storage for offline access
-- **CSV Export:** Export all your data
-- **Editable fields:** Update any field inline
-- **Notes:** Add personal notes to each application
-
-
----
 
 ## 🚀 Installation
 
