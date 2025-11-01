@@ -371,8 +371,8 @@ Please provide a clean JSON response with the most accurate job information you 
 }
 
 // Supabase configuration
-const SUPABASE_URL = 'https://dmzonyrwdqzugsshcxgb.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtem9ueXJ3ZHF6dWdzc2hjeGdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExNzgzNTgsImV4cCI6MjA3Njc1NDM1OH0.0MYp26X7h1JR_r4KO-p_f3aX-dsiaO6Z9ZS8rjU9e7g';
+const SUPABASE_URL = window.ENV_SUPABASE_URL;
+const SUPABASE_KEY = window.ENV_SUPABASE_KEY;
 
 async function saveRow(payload) {
   console.log('=== SAVING JOB TO SUPABASE ===');

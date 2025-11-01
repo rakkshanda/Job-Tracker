@@ -21,6 +21,7 @@ npm-debug.log*
 # Environment variables and API keys
 .env
 .env.local
+config.js
 **/api-keys.txt
 **/*_secret.js
 
@@ -32,4 +33,3 @@ npm-debug.log*
 *.crx
 *.pem
 *.zip
-

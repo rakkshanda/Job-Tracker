@@ -9,6 +9,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Optional user config (defines ENV_SUPABASE_URL/KEY if present) -->
+    <script src="config.js"></script>
     <!-- Google Charts for Sankey Diagram -->
     <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
     <!-- Chart.js for Pie Charts -->
@@ -47,14 +49,7 @@
         <!-- Header Section -->
         <div class="header-section">
             <div class="action-buttons">
-                <button class="action-btn download-csv-btn" id="download-csv-btn">
-                    <i class="fas fa-download"></i>
-                    Download Backup (CSV)
-                </button>
-                <!-- <button class="action-btn import-btn" id="import-csv-btn">
-                    <i class="fas fa-upload"></i>
-                    Import CSV
-                </button> -->
+                <!-- Download Backup removed from header; available in Insights only -->
                 <button class="action-btn delete-selected-btn" id="delete-selected-btn" style="display: none;">
                     <i class="fas fa-trash-alt"></i>
                     Delete Selected (<span id="selected-count">0</span>)
@@ -69,15 +64,19 @@
             <div class="pomodoro-container">
                 <!-- Timer Setup -->
                 <div class="timer-setup" id="timer-setup">
-                    <div class="timer-select-group">
+                    <div class="timer-select-group" id="duration-group">
                         <label for="timer-duration">Select Duration:</label>
                         <select id="timer-duration" class="timer-duration-select">
-                            <option value="30">30 minutes</option>
+                            <option value="0.5">30 seconds</option>
+                            <option value="10">10 minutes</option>
+                            <option value="15">15 minutes</option>
+                            <option value="30" selected>30 minutes</option>
+                            <option value="45">45 minutes</option>
                             <option value="60">60 minutes</option>
                             <option value="90">90 minutes</option>
                         </select>
                     </div>
-                    <div class="timer-select-group" style="width: 100%; max-width: 400px;">
+                    <div class="timer-select-group" style="width: 100%; max-width: 400px; display:none;" id="category-group">
                         <label for="focus-category">Category:</label>
                         <div class="category-tabs" id="category-tabs">
                             <button type="button" class="category-tab active" data-category="job-app">
@@ -94,7 +93,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="timer-select-group" style="width: 100%; max-width: 400px;">
+                    <div class="timer-select-group" style="width: 100%; max-width: 400px; display:none;" id="focus-note-group">
                         <label for="focus-note">What did you focus on?</label>
                         <textarea id="focus-note" class="focus-note-input" placeholder="e.g., Applied to 5 SDE positions, updated resume skills section..." rows="3"></textarea>
                     </div>
@@ -124,20 +123,30 @@
                     </button>
                 </div>
 
-                <!-- Today's Sessions -->
-                <div class="today-sessions">
-                    <h3>Today's Sessions</h3>
-                    <div class="sessions-summary" id="sessions-summary">
-                        <div class="session-stat">
-                            <i class="fas fa-check-circle"></i>
-                            <span id="sessions-count">0</span> sessions
+                <!-- Insights & Sessions Layout -->
+                <div class="pomodoro-insights">
+                    <div class="pomodoro-days" id="pomodoro-days"></div>
+                    <div class="pomodoro-analytics">
+                        <div class="today-sessions">
+                            <h3>Today's Sessions</h3>
+                            <div class="sessions-summary" id="sessions-summary">
+                                <div class="session-stat">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span id="sessions-count">0</span> sessions
+                                </div>
+                                <div class="session-stat">
+                                    <i class="fas fa-clock"></i>
+                                    <span id="sessions-total-time">0</span> minutes
+                                </div>
+                            </div>
+                            <div class="sessions-list" id="sessions-list"></div>
                         </div>
-                        <div class="session-stat">
-                            <i class="fas fa-clock"></i>
-                            <span id="sessions-total-time">0</span> minutes
+
+                        <div class="category-breakdown">
+                            <h3>Category Breakdown</h3>
+                            <div id="pomodoro-category-pie" class="category-pie"></div>
                         </div>
                     </div>
-                    <div class="sessions-list" id="sessions-list"></div>
                 </div>
             </div>
         </div>
@@ -533,8 +542,25 @@
         </div>
 
         <!-- Sankey Chart -->
-        <div class="sankey-chart-container">
-            <div id="sankey-chart"></div>
+    <div class="sankey-chart-container">
+        <div id="sankey-chart"></div>
+    </div>
+</div>
+
+    <!-- Delete Session Confirmation Modal -->
+    <div class="modal" id="delete-session-modal" style="display: none;">
+        <div class="modal-content" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3>Delete Session</h3>
+                <button class="close-btn" id="close-delete-session-modal">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1rem 1.5rem;">
+                <p>Are you sure you want to delete this Pomodoro session? This cannot be undone.</p>
+            </div>
+            <div class="modal-actions" style="display: flex; gap: 0.75rem; justify-content: flex-end; padding: 0 1.5rem 1.25rem;">
+                <button class="action-btn" id="cancel-delete-session-btn" style="background: var(--hover-bg); color: var(--text-primary);">Cancel</button>
+                <button class="action-btn" id="confirm-delete-session-btn" style="background: #ef4444; color: white;">Delete</button>
+            </div>
         </div>
     </div>
 

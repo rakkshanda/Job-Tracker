@@ -28,8 +28,12 @@ class SupabaseJobTracker {
         this.selectedMonth = null;
         
         // Initialize Supabase
-        const SUPABASE_URL = 'https://dmzonyrwdqzugsshcxgb.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtem9ueXJ3ZHF6dWdzc2hjeGdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExNzgzNTgsImV4cCI6MjA3Njc1NDM1OH0.0MYp26X7h1JR_r4KO-p_f3aX-dsiaO6Z9ZS8rjU9e7g';
+        const SUPABASE_URL = window.ENV_SUPABASE_URL;
+        const SUPABASE_KEY = window.ENV_SUPABASE_KEY;
+        if (!SUPABASE_URL || !SUPABASE_KEY) {
+            console.error('Supabase config missing. Create config.js from config.example.js');
+            alert('Supabase config missing. Create config.js from config.example.js');
+        }
         this.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         
         console.log('✅ Supabase client initialized:', this.supabase);
@@ -4355,6 +4359,9 @@ class PomodoroTimer {
         this.focusNote = ''; // Store focus note
         this.category = 'job-app'; // Default category
         this.timerStartTime = null; // Track when timer actually started
+
+        this.currentDayISO = new Date(new Date().setHours(0,0,0,0)).toISOString();
+        this.recentDays = [];
     }
 
     init() {
@@ -4365,6 +4372,8 @@ class PomodoroTimer {
 
         // Load today's sessions
         this.loadTodaySessions();
+        this.loadRecentDays();
+        this.ensureChartsLoaded();
 
         // Event listeners
         const startBtn = document.getElementById('start-timer-btn');
@@ -4414,6 +4423,27 @@ class PomodoroTimer {
             this.hideCancelModal();
         });
 
+        // Delete session modal listeners
+        document.getElementById('close-delete-session-modal')?.addEventListener('click', () => {
+            const m = document.getElementById('delete-session-modal');
+            if (m) m.style.display = 'none';
+            this.pendingDeleteSessionId = null;
+        });
+        document.getElementById('cancel-delete-session-btn')?.addEventListener('click', () => {
+            const m = document.getElementById('delete-session-modal');
+            if (m) m.style.display = 'none';
+            this.pendingDeleteSessionId = null;
+        });
+        document.getElementById('confirm-delete-session-btn')?.addEventListener('click', async () => {
+            const id = this.pendingDeleteSessionId;
+            const m = document.getElementById('delete-session-modal');
+            if (!id) { if (m) m.style.display = 'none'; return; }
+            await this.deleteSession(id);
+            if (m) m.style.display = 'none';
+            this.pendingDeleteSessionId = null;
+            await this.loadTodaySessions();
+        });
+
         // Category tab listeners
         document.querySelectorAll('.category-tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -4426,6 +4456,12 @@ class PomodoroTimer {
                 console.log(`📁 Category selected: ${this.category}`);
             });
         });
+
+        // Hide category and note groups initially
+        const categoryGroup = document.getElementById('category-group');
+        const focusGroup = document.getElementById('focus-note-group');
+        if (categoryGroup) categoryGroup.style.display = 'none';
+        if (focusGroup) focusGroup.style.display = 'none';
 
         console.log('✅ Pomodoro timer initialized');
     }
@@ -4459,18 +4495,31 @@ class PomodoroTimer {
     }
 
     startTimer() {
-        const duration = parseInt(document.getElementById('timer-duration').value);
-        const focusNote = document.getElementById('focus-note').value.trim();
+        // Support fractional minutes (e.g., 0.5 = 30 seconds)
+        const duration = parseFloat(document.getElementById('timer-duration').value);
+        // Do not require note before starting; reveal inputs after start
 
         this.currentDuration = duration;
-        this.totalSeconds = duration * 60;
+        this.totalSeconds = Math.round(duration * 60);
         this.remainingSeconds = this.totalSeconds;
-        this.focusNote = focusNote;
+        // Keep whatever is in the note (likely empty initially)
+        this.focusNote = document.getElementById('focus-note').value.trim();
         this.timerStartTime = Date.now();
 
-        // Hide setup, show timer
-        document.getElementById('timer-setup').style.display = 'none';
+        // Reveal category and focus inputs; keep setup visible during countdown
+        const categoryGroup = document.getElementById('category-group');
+        const focusGroup = document.getElementById('focus-note-group');
+        if (categoryGroup) categoryGroup.style.display = '';
+        if (focusGroup) focusGroup.style.display = '';
+
+        document.getElementById('timer-setup').style.display = 'block';
         document.getElementById('timer-display').style.display = 'flex';
+
+        // Hide duration select and start button while running
+        const durationGroup = document.getElementById('duration-group');
+        const startBtn = document.getElementById('start-timer-btn');
+        if (durationGroup) durationGroup.style.display = 'none';
+        if (startBtn) startBtn.style.display = 'none';
 
         // Start the timer
         this.isRunning = true;
@@ -4487,7 +4536,7 @@ class PomodoroTimer {
             }
         }, 1000);
 
-        console.log(`🍅 Timer started: ${duration} minutes, Focus: "${focusNote}"`);
+        console.log(`🍅 Timer started: ${duration} minutes`);
     }
 
     showCancelModal() {
@@ -4520,6 +4569,11 @@ class PomodoroTimer {
 
         this.clearTimer();
 
+        // Capture latest category and note
+        const selectedTab = document.querySelector('.category-tab.active');
+        this.category = selectedTab ? selectedTab.getAttribute('data-category') : (this.category || 'job-app');
+        this.focusNote = document.getElementById('focus-note').value.trim();
+
         // Save partial session to Supabase
         if (minutesElapsed > 0) {
             await this.saveSession(minutesElapsed, this.focusNote, true); // true = stopped early
@@ -4541,6 +4595,11 @@ class PomodoroTimer {
     async completeTimer() {
         console.log('🍅 Timer completed!');
         this.clearTimer();
+
+        // Capture latest category and note
+        const selectedTab = document.querySelector('.category-tab.active');
+        this.category = selectedTab ? selectedTab.getAttribute('data-category') : (this.category || 'job-app');
+        this.focusNote = document.getElementById('focus-note').value.trim();
 
         // Save to Supabase (full duration completed)
         await this.saveSession(this.currentDuration, this.focusNote, false); // false = completed fully
@@ -4569,6 +4628,16 @@ class PomodoroTimer {
         document.getElementById('timer-display').style.display = 'none';
         // Clear the focus note input
         document.getElementById('focus-note').value = '';
+        // Hide category and note groups again until next start
+        const categoryGroup = document.getElementById('category-group');
+        const focusGroup = document.getElementById('focus-note-group');
+        if (categoryGroup) categoryGroup.style.display = 'none';
+        if (focusGroup) focusGroup.style.display = 'none';
+        // Show duration and start button again
+        const durationGroup = document.getElementById('duration-group');
+        const startBtn = document.getElementById('start-timer-btn');
+        if (durationGroup) durationGroup.style.display = '';
+        if (startBtn) startBtn.style.display = '';
     }
 
     updateTimerDisplay() {
@@ -4684,23 +4753,131 @@ class PomodoroTimer {
 
     async loadTodaySessions() {
         try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayISO = today.toISOString();
+            const day = this.currentDayISO ? new Date(this.currentDayISO) : new Date();
+            day.setHours(0, 0, 0, 0);
+            const todayISO = day.toISOString();
+            const nextDayISO = new Date(day.getTime() + 24*60*60*1000).toISOString();
 
             const { data, error } = await this.supabase
                 .from('pomodoro_sessions')
                 .select('*')
                 .gte('completed_at', todayISO)
+                .lt('completed_at', nextDayISO)
                 .order('completed_at', { ascending: false });
 
             if (error) throw error;
 
             this.displayTodaySessions(data || []);
+            this.renderCategoryPie(data || []);
         } catch (error) {
             console.error('❌ Error loading sessions:', error);
             this.displayTodaySessions([]);
         }
+    }
+
+    async loadRecentDays(limit = 30) {
+        try {
+            const { data, error } = await this.supabase
+                .from('pomodoro_sessions')
+                .select('completed_at, duration_minutes')
+                .order('completed_at', { ascending: false })
+                .limit(1000);
+            if (error) throw error;
+
+            const map = new Map();
+            (data || []).forEach(row => {
+                const d = new Date(row.completed_at);
+                d.setHours(0,0,0,0);
+                const key = d.toISOString();
+                const prev = map.get(key) || 0;
+                map.set(key, prev + (row.duration_minutes || 0));
+            });
+
+            const days = Array.from(map.entries())
+                .sort((a,b) => new Date(b[0]) - new Date(a[0]))
+                .slice(0, limit)
+                .map(([iso, minutes]) => ({ iso, minutes }));
+            this.recentDays = days;
+            this.renderDaysSidebar();
+        } catch (e) {
+            console.error('❌ Error loading recent days:', e);
+            this.recentDays = [];
+            this.renderDaysSidebar();
+        }
+    }
+
+    renderDaysSidebar() {
+        const el = document.getElementById('pomodoro-days');
+        if (!el) return;
+        if (!this.recentDays.length) {
+            el.innerHTML = '<div style="color:#64748b; padding:0.5rem;">No data</div>';
+            return;
+        }
+        el.innerHTML = this.recentDays.map(d => {
+            const date = new Date(d.iso);
+            const label = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', weekday: 'short' });
+            const hours = (d.minutes/60).toFixed(1);
+            const active = (this.currentDayISO && new Date(this.currentDayISO).toISOString() === new Date(d.iso).toISOString()) ? 'active' : '';
+            return `<div class="pomodoro-day-item ${active}" data-iso="${d.iso}">
+                <span>${label}</span>
+                <span style="font-weight:600">${hours}h</span>
+            </div>`;
+        }).join('');
+
+        el.querySelectorAll('.pomodoro-day-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.currentDayISO = item.getAttribute('data-iso');
+                el.querySelectorAll('.pomodoro-day-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                this.loadTodaySessions();
+            });
+        });
+    }
+
+    ensureChartsLoaded() {
+        if (typeof google !== 'undefined' && google.charts) return;
+        if (typeof google === 'undefined') return; // rely on existing loader from Sankey page
+        try { google.charts.load('current', { packages: ['corechart'] }); } catch {}
+    }
+
+    renderCategoryPie(sessions) {
+        if (typeof google === 'undefined' || !google.visualization) {
+            // Try to load then defer
+            if (typeof google !== 'undefined' && google.charts) {
+                google.charts.load('current', { packages: ['corechart'] });
+                setTimeout(() => this.renderCategoryPie(sessions), 400);
+            }
+            return;
+        }
+        const container = document.getElementById('pomodoro-category-pie');
+        if (!container) return;
+
+        const totals = sessions.reduce((acc, s) => {
+            const cat = s.category || 'General';
+            acc[cat] = (acc[cat] || 0) + (s.duration_minutes || 0);
+            return acc;
+        }, {});
+
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Category');
+        data.addColumn('number', 'Minutes');
+        const rows = Object.entries(totals);
+        if (!rows.length) {
+            container.innerHTML = '<div style="color:#64748b; text-align:center; padding:1rem;">No data for this day</div>';
+            return;
+        }
+        data.addRows(rows);
+
+        const options = {
+            legend: { position: 'right', textStyle: { color: getComputedStyle(document.body).getPropertyValue('--text-color') || '#1f2937' } },
+            backgroundColor: 'transparent',
+            pieHole: 0.35,
+            chartArea: { left: 10, top: 10, width: '85%', height: '85%' },
+            colors: ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e']
+        };
+
+        const chart = new google.visualization.PieChart(container);
+        chart.draw(data, options);
     }
 
     displayTodaySessions(sessions) {
@@ -4799,13 +4976,15 @@ class PomodoroTimer {
             `;
         }).join('');
 
-        // Add click handlers for delete buttons
+        // Add click handlers for delete buttons (show modal instead of confirm)
         document.querySelectorAll('.timeline-check').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+            btn.addEventListener('click', (e) => {
                 const sessionId = e.currentTarget.dataset.sessionId;
-                if (sessionId && confirm('Delete this session?')) {
-                    await this.deleteSession(sessionId);
-                }
+                if (!sessionId) return;
+
+                this.pendingDeleteSessionId = sessionId;
+                const modal = document.getElementById('delete-session-modal');
+                if (modal) modal.style.display = 'flex';
             });
         });
     }

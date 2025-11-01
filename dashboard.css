@@ -1760,7 +1760,8 @@ body.dark-mode .modal {
 }
 
 .insights-toggle-btn,
-.sankey-toggle-btn {
+.sankey-toggle-btn,
+.pomodoro-toggle-btn {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -1776,14 +1777,16 @@ body.dark-mode .modal {
 }
 
 .insights-toggle-btn:hover,
-.sankey-toggle-btn:hover {
+.sankey-toggle-btn:hover,
+.pomodoro-toggle-btn:hover {
     background: #4f46e5;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
 .insights-toggle-btn i,
-.sankey-toggle-btn i {
+.sankey-toggle-btn i,
+.pomodoro-toggle-btn i {
     font-size: 1rem;
 }
 
@@ -2029,6 +2032,90 @@ body.dark-mode .modal {
     transition: opacity 0.3s ease;
 }
 
+/* Dark Mode: Pomodoro */
+body.dark-mode .pomodoro-section {
+    background: #0f172a;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+body.dark-mode .pomodoro-title {
+    color: #e2e8f0;
+}
+
+body.dark-mode .timer-select-group label {
+    color: #cbd5e1;
+}
+
+body.dark-mode .timer-duration-select {
+    background: #0b1220;
+    color: #e2e8f0;
+    border-color: #243049;
+}
+
+body.dark-mode .category-tab {
+    background: #0b1220;
+    color: #e2e8f0;
+    border-color: #243049;
+}
+
+body.dark-mode .category-tab.active {
+    background: #1e293b;
+    border-color: #4f46e5;
+}
+
+body.dark-mode .timer-circle-bg {
+    stroke: #233047;
+}
+
+body.dark-mode .timer-time {
+    color: #e2e8f0;
+}
+
+body.dark-mode .timer-label {
+    color: #94a3b8;
+}
+
+body.dark-mode .stop-timer-btn {
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.25);
+}
+
+body.dark-mode .today-sessions {
+    background: #0b1220;
+}
+body.dark-mode .today-sessions h3 {
+    color: #ffffff;
+}
+
+body.dark-mode .timeline-item:not(:last-child)::before {
+    background: #1f2a44;
+}
+
+body.dark-mode .timeline-time {
+    color: #94a3b8;
+}
+
+body.dark-mode .timeline-duration {
+    color: #64748b;
+}
+
+body.dark-mode .timeline-task {
+    color: #e2e8f0;
+}
+
+body.dark-mode .timeline-task.completed {
+    color: #64748b;
+}
+
+body.dark-mode .timeline-note {
+    color: #94a3b8;
+}
+
+body.dark-mode .timeline-category.job-app { background: #0b3b7a; color: #bfdbfe; }
+body.dark-mode .timeline-category.portfolio { background: #5a1030; color: #fecdd3; }
+body.dark-mode .timeline-category.projects { background: #064e3b; color: #bbf7d0; }
+body.dark-mode .timeline-category.networking { background: #713f12; color: #fde68a; }
+
+
 @keyframes slideInRight {
     from {
         transform: translateX(100%);
@@ -2062,6 +2149,49 @@ body.dark-mode .modal {
     align-items: center;
     gap: 3rem;
 }
+
+/* Insights layout */
+.pomodoro-insights {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 1.5rem;
+    width: 100%;
+}
+
+.pomodoro-days {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 0.75rem;
+    max-height: 420px;
+    overflow: auto;
+}
+
+.pomodoro-day-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    cursor: pointer;
+    color: #0f172a;
+}
+
+.pomodoro-day-item:hover { background: #e2e8f0; }
+.pomodoro-day-item.active { background: #c7d2fe; }
+
+.pomodoro-analytics { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.category-breakdown { background: #ffffff; border-radius: 12px; padding: 1.5rem; }
+.category-breakdown h3 { font-size: 1.3rem; font-weight: 600; color: #1a1a1a; margin-bottom: 1rem; }
+.category-pie { width: 100%; height: 320px; }
+
+/* Dark mode for insights */
+body.dark-mode .pomodoro-days { background: #0b1220; }
+body.dark-mode .pomodoro-day-item { color: #e2e8f0; }
+body.dark-mode .pomodoro-day-item:hover { background: #1e293b; }
+body.dark-mode .pomodoro-day-item.active { background: #334155; }
+body.dark-mode .category-breakdown { background: #0f172a; }
+body.dark-mode .category-breakdown h3 { color: #ffffff; }
 
 /* Timer Setup */
 .timer-setup {
@@ -2103,6 +2233,52 @@ body.dark-mode .modal {
     outline: none;
     border-color: #6366f1;
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+/* Focus note input */
+.focus-note-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    background: white;
+    color: #111827;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    resize: vertical;
+}
+
+.focus-note-input::placeholder {
+    color: #9ca3af;
+}
+
+.focus-note-input:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+/* Dark mode for inputs */
+body.dark-mode .focus-note-input {
+    background: #0b1220;
+    color: #e2e8f0;
+    border-color: #243049;
+}
+
+body.dark-mode .focus-note-input::placeholder {
+    color: #64748b;
+}
+
+body.dark-mode .timer-duration-select {
+    background: #0b1220;
+    color: #e2e8f0;
+    border-color: #243049;
+}
+
+body.dark-mode .timer-duration-select:focus,
+body.dark-mode .focus-note-input:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.25);
 }
 
 .category-tabs {
@@ -2473,27 +2649,4 @@ body.dark-mode .modal {
     color: #92400e;
 }
 
-.pomodoro-toggle-btn {
-    background: transparent;
-    border: none;
-    color: #666;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
-}
-
-.pomodoro-toggle-btn:hover {
-    background: rgba(99, 102, 241, 0.1);
-    color: #6366f1;
-}
-
-.pomodoro-toggle-btn.active {
-    background: rgba(99, 102, 241, 0.1);
-    color: #6366f1;
-}
-
+/* Removed old Pomodoro overrides to match Insights/Sankey styling */
