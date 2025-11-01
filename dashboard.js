@@ -4353,6 +4353,7 @@ class PomodoroTimer {
         this.isRunning = false;
         this.currentDuration = 30; // Default
         this.focusNote = ''; // Store focus note
+        this.category = 'job-app'; // Default category
         this.timerStartTime = null; // Track when timer actually started
     }
 
@@ -4411,6 +4412,19 @@ class PomodoroTimer {
 
         document.getElementById('close-cancel-timer-modal')?.addEventListener('click', () => {
             this.hideCancelModal();
+        });
+
+        // Category tab listeners
+        document.querySelectorAll('.category-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active from all tabs
+                document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
+                // Add active to clicked tab
+                tab.classList.add('active');
+                // Store selected category
+                this.category = tab.dataset.category;
+                console.log(`📁 Category selected: ${this.category}`);
+            });
         });
 
         console.log('✅ Pomodoro timer initialized');
@@ -4628,11 +4642,12 @@ class PomodoroTimer {
 
     async saveSession(durationMinutes, focusNote = '', stoppedEarly = false) {
         try {
-            const { data, error } = await this.supabase
+            const { data, error} = await this.supabase
                 .from('pomodoro_sessions')
                 .insert([{
                     duration_minutes: durationMinutes,
                     focus_note: focusNote,
+                    category: this.category,
                     stopped_early: stoppedEarly,
                     completed_at: new Date().toISOString()
                 }])
@@ -4645,6 +4660,25 @@ class PomodoroTimer {
         } catch (error) {
             console.error('❌ Error saving session:', error);
             alert('Failed to save session to database. Please check your connection.');
+        }
+    }
+
+    async deleteSession(sessionId) {
+        try {
+            const { error } = await this.supabase
+                .from('pomodoro_sessions')
+                .delete()
+                .eq('id', sessionId);
+
+            if (error) throw error;
+
+            console.log('✅ Session deleted from Supabase');
+
+            // Reload today's sessions
+            await this.loadTodaySessions();
+        } catch (error) {
+            console.error('❌ Error deleting session:', error);
+            alert('Failed to delete session from database.');
         }
     }
 
@@ -4727,8 +4761,24 @@ class PomodoroTimer {
             const taskName = session.focus_note || 'Focus session';
             const taskClass = session.stopped_early ? '' : 'completed';
 
-            // Checkmark
-            const checkClass = session.stopped_early ? 'stopped' : 'completed';
+            // Category badge
+            const categoryLabel = {
+                'job-app': 'Job App',
+                'portfolio': 'Portfolio',
+                'projects': 'Projects',
+                'networking': 'Networking'
+            }[session.category] || 'General';
+
+            const categoryBadge = session.category
+                ? `<span class="timeline-category ${session.category}">${categoryLabel}</span>`
+                : '';
+
+            // Delete button (X for all sessions)
+            const deleteButton = `
+                <div class="timeline-check stopped" data-session-id="${session.id}" title="Delete session">
+                    <i class="fas fa-times"></i>
+                </div>
+            `;
 
             return `
                 <div class="timeline-item">
@@ -4738,17 +4788,26 @@ class PomodoroTimer {
                     <div class="timeline-content">
                         <div class="timeline-time">
                             ${startTimeStr} – ${endTimeStr} <span class="timeline-duration">(${durationDisplay})</span>
+                            ${categoryBadge}
                         </div>
                         <div class="timeline-task ${taskClass}">
                             ${taskName}
                         </div>
                     </div>
-                    <div class="timeline-check ${checkClass}">
-                        <i class="fas fa-check"></i>
-                    </div>
+                    ${deleteButton}
                 </div>
             `;
         }).join('');
+
+        // Add click handlers for delete buttons
+        document.querySelectorAll('.timeline-check').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const sessionId = e.currentTarget.dataset.sessionId;
+                if (sessionId && confirm('Delete this session?')) {
+                    await this.deleteSession(sessionId);
+                }
+            });
+        });
     }
 
     showCompletionNotification() {

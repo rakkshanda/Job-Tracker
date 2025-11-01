@@ -78,8 +78,25 @@
                         </select>
                     </div>
                     <div class="timer-select-group" style="width: 100%; max-width: 400px;">
-                        <label for="focus-note">What will you focus on?</label>
-                        <textarea id="focus-note" class="focus-note-input" placeholder="e.g., Applying to SDE positions, updating resume, researching companies..." rows="3"></textarea>
+                        <label for="focus-category">Category:</label>
+                        <div class="category-tabs" id="category-tabs">
+                            <button type="button" class="category-tab active" data-category="job-app">
+                                <i class="fas fa-briefcase"></i> Job App
+                            </button>
+                            <button type="button" class="category-tab" data-category="portfolio">
+                                <i class="fas fa-folder"></i> Portfolio
+                            </button>
+                            <button type="button" class="category-tab" data-category="projects">
+                                <i class="fas fa-code"></i> Projects
+                            </button>
+                            <button type="button" class="category-tab" data-category="networking">
+                                <i class="fas fa-users"></i> Networking
+                            </button>
+                        </div>
+                    </div>
+                    <div class="timer-select-group" style="width: 100%; max-width: 400px;">
+                        <label for="focus-note">What did you focus on?</label>
+                        <textarea id="focus-note" class="focus-note-input" placeholder="e.g., Applied to 5 SDE positions, updated resume skills section..." rows="3"></textarea>
                     </div>
                     <button class="start-timer-btn" id="start-timer-btn">
                         <i class="fas fa-play"></i>
