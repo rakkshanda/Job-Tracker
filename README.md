@@ -45,7 +45,7 @@ Concise setup for saving job applications to Supabase and using the built‑in P
 - **Sortable columns:** Always shows most recent first
 - **Bulk actions:** Delete multiple entries
 
-### 🎨 **Beautiful UI**
+### UI**
 - Modern, clean design
 - Floating button that follows you on job pages
 - Skeleton loading animations
@@ -59,19 +59,12 @@ Concise setup for saving job applications to Supabase and using the built‑in P
 - **Editable fields:** Update any field inline
 - **Notes:** Add personal notes to each application
 
-### 🔧 **Developer-Friendly**
-- Clean, modular code
-- Well-documented
-- Easy to customize
-- No build process required
 
 ---
 
 ## 🚀 Installation
 
-### **Prerequisites**
-- Google Chrome browser
-- Supabase account (free tier works!)
+
 
 ### Quick Start
 
