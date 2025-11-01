@@ -2262,29 +2262,133 @@ body.dark-mode .modal {
 }
 
 .sessions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+    position: relative;
+    padding-left: 0;
+    margin-top: 1.5rem;
 }
 
-.session-item {
-    background: white;
-    padding: 1rem;
-    border-radius: 8px;
+/* Timeline Items */
+.timeline-item {
+    position: relative;
+    padding-left: 60px;
+    padding-bottom: 2rem;
     display: flex;
-    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.timeline-item:last-child {
+    padding-bottom: 0;
+}
+
+/* Vertical connecting line */
+.timeline-item:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 22px;
+    top: 45px;
+    width: 2px;
+    height: calc(100% - 25px);
+    background: #e5e7eb;
+}
+
+/* Circle icon container */
+.timeline-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    display: flex;
     align-items: center;
-    border-left: 4px solid #6366f1;
+    justify-content: center;
+    font-size: 1.2rem;
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.session-duration {
-    font-weight: 600;
-    color: #6366f1;
+.timeline-icon.completed {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
 }
 
-.session-time {
-    font-size: 0.9rem;
+.timeline-icon.stopped {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.timeline-icon.short {
+    background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+}
+
+.timeline-icon.long {
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+}
+
+/* Timeline content */
+.timeline-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.timeline-time {
+    font-size: 0.95rem;
     color: #666;
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.timeline-duration {
+    color: #999;
+    font-size: 0.85rem;
+}
+
+.timeline-task {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: #1a1a1a;
+    margin-bottom: 0.25rem;
+    word-wrap: break-word;
+}
+
+.timeline-task.completed {
+    text-decoration: line-through;
+    color: #9ca3af;
+}
+
+.timeline-note {
+    font-size: 0.85rem;
+    color: #666;
+    font-style: italic;
+    margin-top: 0.25rem;
+}
+
+/* Checkmark on right */
+.timeline-check {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.timeline-check.completed {
+    background: #10b981;
+    color: white;
+}
+
+.timeline-check.stopped {
+    background: #f59e0b;
+    color: white;
+}
+
+.timeline-check i {
+    font-size: 0.7rem;
 }
 
 .pomodoro-toggle-btn {

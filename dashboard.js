@@ -4495,16 +4495,20 @@ class PomodoroTimer {
     async stopAndSaveTimer() {
         console.log('🛑 Stopping timer and saving progress');
 
-        // Calculate actual time focused (in minutes)
-        const timeElapsed = Math.ceil((this.totalSeconds - this.remainingSeconds) / 60);
+        // Calculate actual time focused (in seconds)
+        const secondsElapsed = this.totalSeconds - this.remainingSeconds;
+        // Convert to decimal minutes (e.g., 150 seconds = 2.5 minutes)
+        const minutesElapsed = Number((secondsElapsed / 60).toFixed(2));
 
-        console.log(`⏱️ Time focused: ${timeElapsed} minutes out of ${this.currentDuration} planned`);
+        const mins = Math.floor(minutesElapsed);
+        const secs = Math.round((minutesElapsed - mins) * 60);
+        console.log(`⏱️ Time focused: ${mins}m ${secs}s (${minutesElapsed} minutes) out of ${this.currentDuration} planned`);
 
         this.clearTimer();
 
         // Save partial session to Supabase
-        if (timeElapsed > 0) {
-            await this.saveSession(timeElapsed, this.focusNote, true); // true = stopped early
+        if (minutesElapsed > 0) {
+            await this.saveSession(minutesElapsed, this.focusNote, true); // true = stopped early
         }
 
         // Reset UI
@@ -4680,29 +4684,68 @@ class PomodoroTimer {
         }
 
         sessionsList.innerHTML = sessions.map(session => {
-            const completedTime = new Date(session.completed_at).toLocaleTimeString('en-US', {
+            const completedAt = new Date(session.completed_at);
+
+            // Calculate start time based on duration
+            const mins = Math.floor(session.duration_minutes);
+            const secs = Math.round((session.duration_minutes - mins) * 60);
+            const totalSeconds = mins * 60 + secs;
+            const startTime = new Date(completedAt.getTime() - totalSeconds * 1000);
+
+            // Format time range
+            const startTimeStr = startTime.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+            const endTimeStr = completedAt.toLocaleTimeString('en-US', {
                 hour: 'numeric',
                 minute: '2-digit'
             });
 
-            const statusBadge = session.stopped_early
-                ? '<span style="background: #fbbf24; color: #78350f; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 8px;">STOPPED</span>'
-                : '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 8px;">COMPLETED</span>';
+            // Format duration
+            const durationDisplay = secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`;
 
-            const focusNote = session.focus_note
-                ? `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem; font-style: italic;">${session.focus_note}</div>`
-                : '';
+            // Determine icon type based on duration and status
+            let iconClass = '';
+            let icon = '';
+            if (session.stopped_early) {
+                iconClass = 'stopped';
+                icon = '<i class="fas fa-pause"></i>';
+            } else {
+                iconClass = 'completed';
+                icon = '<i class="fas fa-check"></i>';
+            }
+
+            // Add duration-based styling
+            if (mins >= 60) {
+                iconClass += ' long';
+            } else if (mins < 30) {
+                iconClass += ' short';
+            }
+
+            // Task name (use focus note or default)
+            const taskName = session.focus_note || 'Focus session';
+            const taskClass = session.stopped_early ? '' : 'completed';
+
+            // Checkmark
+            const checkClass = session.stopped_early ? 'stopped' : 'completed';
 
             return `
-                <div class="session-item">
-                    <div>
-                        <div style="display: flex; align-items: center;">
-                            <span class="session-duration">${session.duration_minutes} minutes</span>
-                            ${statusBadge}
-                        </div>
-                        ${focusNote}
+                <div class="timeline-item">
+                    <div class="timeline-icon ${iconClass}">
+                        ${icon}
                     </div>
-                    <div class="session-time">Completed at ${completedTime}</div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">
+                            ${startTimeStr} – ${endTimeStr} <span class="timeline-duration">(${durationDisplay})</span>
+                        </div>
+                        <div class="timeline-task ${taskClass}">
+                            ${taskName}
+                        </div>
+                    </div>
+                    <div class="timeline-check ${checkClass}">
+                        <i class="fas fa-check"></i>
+                    </div>
                 </div>
             `;
         }).join('');
