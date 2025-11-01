@@ -57,6 +57,89 @@ class SupabaseJobTracker {
         })[char]);
     }
 
+    normalizeId(id) {
+        if (id === null || id === undefined) {
+            return '';
+        }
+        const str = typeof id === 'string' ? id : String(id);
+        const trimmed = str.trim();
+        if (!trimmed || trimmed === 'undefined' || trimmed === 'null') {
+            return '';
+        }
+        return trimmed;
+    }
+
+    capitalizeWords(str) {
+        if (!str || typeof str !== 'string') {
+            return '';
+        }
+        return str.trim().split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+    }
+
+    normalizeLocation(location) {
+        if (!location || typeof location !== 'string') {
+            return '';
+        }
+
+        let normalized = location.trim();
+
+        // Remove state abbreviations (e.g., ", WA" or ", CA")
+        // Matches patterns like "Seattle, WA" or "Seattle, Washington"
+        normalized = normalized.replace(/,\s*[A-Z]{2}$/i, ''); // Removes ", WA", ", CA", etc.
+        normalized = normalized.replace(/,\s*[A-Za-z\s]+$/i, (match) => {
+            // Only remove if it looks like a state name (common US states)
+            const states = [
+                'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado',
+                'connecticut', 'delaware', 'florida', 'georgia', 'hawaii', 'idaho',
+                'illinois', 'indiana', 'iowa', 'kansas', 'kentucky', 'louisiana',
+                'maine', 'maryland', 'massachusetts', 'michigan', 'minnesota',
+                'mississippi', 'missouri', 'montana', 'nebraska', 'nevada',
+                'new hampshire', 'new jersey', 'new mexico', 'new york',
+                'north carolina', 'north dakota', 'ohio', 'oklahoma', 'oregon',
+                'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+                'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington',
+                'west virginia', 'wisconsin', 'wyoming'
+            ];
+            const stateName = match.replace(/,\s*/i, '').toLowerCase();
+            return states.includes(stateName) ? '' : match;
+        });
+
+        // Trim any trailing commas or spaces
+        normalized = normalized.replace(/[,\s]+$/, '').trim();
+
+        // Capitalize first letter of each word
+        normalized = this.capitalizeWords(normalized);
+
+        return normalized;
+    }
+
+    normalizeCompanyName(company) {
+        if (!company || typeof company !== 'string') {
+            return '';
+        }
+        // Capitalize first letter of each word
+        return this.capitalizeWords(company.trim());
+    }
+
+    idsMatch(a, b) {
+        return this.normalizeId(a) === this.normalizeId(b);
+    }
+
+    getElementJobId(element) {
+        if (!element) return '';
+        const directId = this.normalizeId(element.dataset?.id);
+        if (directId) {
+            return directId;
+        }
+        const row = element.closest('tr[data-id]');
+        if (row) {
+            return this.normalizeId(row.dataset.id);
+        }
+        return '';
+    }
+
     sanitizeUrl(url) {
         if (!url) return '';
         const trimmed = String(url).trim();
@@ -690,12 +773,74 @@ class SupabaseJobTracker {
                 await chrome.storage.local.set({ savedJobs: this.jobs });
                 console.log('Saved jobs to Chrome storage');
             }
-            
+
             // Save to localStorage as backup
             localStorage.setItem('jobTrackerJobs', JSON.stringify(this.jobs));
             console.log('Saved jobs to localStorage:', this.jobs.length);
         } catch (error) {
             console.error('Error saving jobs:', error);
+        }
+    }
+
+    // Utility function to normalize all existing entries in Supabase
+    async normalizeAllEntries() {
+        try {
+            console.log('🔄 Starting normalization of all entries...');
+
+            // Fetch all jobs
+            const { data: allJobs, error: fetchError } = await this.supabase
+                .from('jobs')
+                .select('*');
+
+            if (fetchError) {
+                throw fetchError;
+            }
+
+            console.log(`Found ${allJobs.length} jobs to normalize`);
+
+            let updatedCount = 0;
+            let skippedCount = 0;
+
+            for (const job of allJobs) {
+                const normalizedLocation = this.normalizeLocation(job.location || '');
+                const normalizedCompany = this.normalizeCompanyName(job.company || '');
+
+                // Only update if something changed
+                if (normalizedLocation !== job.location || normalizedCompany !== job.company) {
+                    const { error: updateError } = await this.supabase
+                        .from('jobs')
+                        .update({
+                            location: normalizedLocation,
+                            company: normalizedCompany
+                        })
+                        .eq('id', job.id);
+
+                    if (updateError) {
+                        console.error(`Error updating job ${job.id}:`, updateError);
+                    } else {
+                        updatedCount++;
+                        console.log(`✅ Updated: "${job.company}" → "${normalizedCompany}", "${job.location}" → "${normalizedLocation}"`);
+                    }
+                } else {
+                    skippedCount++;
+                }
+            }
+
+            console.log(`\n✅ Normalization complete!`);
+            console.log(`   Updated: ${updatedCount} jobs`);
+            console.log(`   Skipped: ${skippedCount} jobs (already normalized)`);
+
+            // Reload jobs to reflect changes
+            await this.loadJobs();
+            this.renderJobs();
+            this.updateStats();
+            this.populateFilterOptions();
+
+            alert(`Normalization complete!\nUpdated: ${updatedCount} jobs\nSkipped: ${skippedCount} jobs`);
+
+        } catch (error) {
+            console.error('Error normalizing entries:', error);
+            alert('Error normalizing entries: ' + error.message);
         }
     }
 
@@ -895,8 +1040,8 @@ class SupabaseJobTracker {
             const normalizedStatus = ((jobData.status || 'saved') + '').toLowerCase();
             const newJobData = {
                 title: jobData.title || '',
-                company: jobData.company || '',
-                location: jobData.location || '',
+                company: this.normalizeCompanyName(jobData.company || ''),
+                location: this.normalizeLocation(jobData.location || ''),
                 job_id: jobData.jobId || '',
                 status: normalizedStatus,
                 applied_date: jobData.appliedDate || this.getTodayDate(),
@@ -934,12 +1079,18 @@ class SupabaseJobTracker {
 
     async updateJobStatus(id, newStatus) {
         try {
+            const normalizedId = this.normalizeId(id);
+            if (!normalizedId) {
+                console.error('Invalid job id supplied for status update:', id);
+                alert('Unable to update status because this job is missing a valid id. Please refresh and try again.');
+                return false;
+            }
             console.log(`=== UPDATING JOB STATUS ===`);
-            console.log('Job ID:', id);
+            console.log('Job ID:', normalizedId);
             console.log('New status:', newStatus);
 
             // Get current job data to access status history
-            const job = this.jobs.find(j => j.id === id);
+            const job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
             if (!job) {
                 throw new Error('Job not found');
             }
@@ -985,7 +1136,7 @@ class SupabaseJobTracker {
                     status: newStatus,
                     status_history: updatedHistory
                 })
-                .eq('id', id)
+                .eq('id', normalizedId)
                 .select()
                 .single();
 
@@ -994,7 +1145,7 @@ class SupabaseJobTracker {
             }
 
             // Update local data
-            const jobIndex = this.jobs.findIndex(j => j.id === id);
+            const jobIndex = this.jobs.findIndex(j => this.idsMatch(j.id, normalizedId));
             if (jobIndex !== -1) {
                 this.jobs[jobIndex] = data;
             }
@@ -1014,14 +1165,20 @@ class SupabaseJobTracker {
 
     async updateJobSource(id, newSource) {
         try {
+            const normalizedId = this.normalizeId(id);
+            if (!normalizedId) {
+                console.error('Invalid job id supplied for source update:', id);
+                alert('Unable to update source because this job is missing a valid id. Please refresh and try again.');
+                return false;
+            }
             console.log(`=== UPDATING JOB SOURCE ===`);
-            console.log('Job ID:', id);
+            console.log('Job ID:', normalizedId);
             console.log('New source:', newSource);
 
             const { data, error } = await this.supabase
                 .from('jobs')
                 .update({ source: newSource })
-                .eq('id', id)
+                .eq('id', normalizedId)
                 .select()
                 .single();
 
@@ -1030,7 +1187,7 @@ class SupabaseJobTracker {
             }
 
             // Update local data
-            const jobIndex = this.jobs.findIndex(j => j.id === id);
+            const jobIndex = this.jobs.findIndex(j => this.idsMatch(j.id, normalizedId));
             if (jobIndex !== -1) {
                 this.jobs[jobIndex] = data;
             }
@@ -1050,9 +1207,20 @@ class SupabaseJobTracker {
 
     async deleteJob(id) {
         try {
-            const job = this.jobs.find(j => j.id === id);
+            const normalizedId = this.normalizeId(id);
+            if (!normalizedId) {
+                console.error('Delete requested without valid id:', id);
+                alert('Unable to determine which job to delete. Please refresh and try again.');
+                return;
+            }
+
+            let job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
             if (!job) {
-                console.error('Job not found with id:', id);
+                job = this.filteredJobs.find(j => this.idsMatch(j.id, normalizedId));
+            }
+            if (!job) {
+                console.error('Job not found with id:', normalizedId);
+                alert('Could not locate this job locally. Please refresh the dashboard and try again.');
                 return;
             }
 
@@ -1067,14 +1235,14 @@ class SupabaseJobTracker {
             const { error } = await this.supabase
                 .from('jobs')
                 .delete()
-                .eq('id', id);
+                .eq('id', normalizedId);
 
             if (error) {
                 throw error;
             }
 
             // Remove from local data
-            this.jobs = this.jobs.filter(j => j.id !== id);
+            this.jobs = this.jobs.filter(j => !this.idsMatch(j.id, normalizedId));
             await this.saveJobs();
             this.applyFilters();
             this.populateFilterOptions();
@@ -1088,17 +1256,23 @@ class SupabaseJobTracker {
 
     async deleteStatusHistoryEntry(jobId, entryIndex) {
         try {
+            const normalizedId = this.normalizeId(jobId);
+            if (!normalizedId) {
+                console.error('Invalid job id supplied for status history delete:', jobId);
+                alert('Unable to delete status history because this job is missing a valid id. Please refresh and try again.');
+                return;
+            }
             if (!confirm('Are you sure you want to delete this status change from history?')) {
                 return;
             }
 
-            const job = this.jobs.find(j => j.id === jobId);
+            const job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
             if (!job) {
                 throw new Error('Job not found');
             }
 
             console.log('=== DELETING STATUS HISTORY ENTRY ===');
-            console.log('Job ID:', jobId);
+            console.log('Job ID:', normalizedId);
             console.log('Entry index:', entryIndex);
 
             // Get current status history
@@ -1111,7 +1285,7 @@ class SupabaseJobTracker {
             const { data, error } = await this.supabase
                 .from('jobs')
                 .update({ status_history: updatedHistory })
-                .eq('id', jobId)
+                .eq('id', normalizedId)
                 .select()
                 .single();
 
@@ -1120,7 +1294,7 @@ class SupabaseJobTracker {
             }
 
             // Update local data
-            const jobIndex = this.jobs.findIndex(j => j.id === jobId);
+            const jobIndex = this.jobs.findIndex(j => this.idsMatch(j.id, normalizedId));
             if (jobIndex !== -1) {
                 this.jobs[jobIndex] = data;
             }
@@ -1154,13 +1328,19 @@ class SupabaseJobTracker {
                 return;
             }
             
-            const job = this.jobs.find(j => j.id === jobId);
+            const normalizedId = this.normalizeId(jobId);
+            if (!normalizedId) {
+                console.error('Invalid job id supplied for status history add:', jobId);
+                alert('Unable to update status history because this job is missing a valid id. Please refresh and try again.');
+                return;
+            }
+            const job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
             if (!job) {
                 throw new Error('Job not found');
             }
             
             console.log('=== ADDING STATUS TO HISTORY ===');
-            console.log('Job ID:', jobId);
+            console.log('Job ID:', normalizedId);
             console.log('New status:', newStatus);
             console.log('Date/Time:', newDateTime);
             
@@ -1191,7 +1371,7 @@ class SupabaseJobTracker {
                     status: newStatus, // Also update the current status
                     status_history: updatedHistory 
                 })
-                .eq('id', jobId)
+                .eq('id', normalizedId)
                 .select()
                 .single();
             
@@ -1200,7 +1380,7 @@ class SupabaseJobTracker {
             }
             
             // Update local data
-            const jobIndex = this.jobs.findIndex(j => j.id === jobId);
+            const jobIndex = this.jobs.findIndex(j => this.idsMatch(j.id, normalizedId));
             if (jobIndex !== -1) {
                 this.jobs[jobIndex] = data;
             }
@@ -1247,6 +1427,7 @@ class SupabaseJobTracker {
         const paginatedJobs = this.filteredJobs.slice(startIndex, endIndex);
 
         const rows = paginatedJobs.map(job => {
+            const jobId = this.normalizeId(job.id);
             const title = this.sanitize(job.title || 'Untitled role');
             const company = this.sanitize(job.company || '—');
             const location = this.sanitize(job.location || '—');
@@ -1273,9 +1454,9 @@ class SupabaseJobTracker {
             }).join('');
 
             return `
-                <tr data-id="${job.id}">
+                <tr data-id="${jobId}">
                     <td class="select-cell">
-                        <input type="checkbox" class="job-checkbox" data-id="${job.id}">
+                        <input type="checkbox" class="job-checkbox" data-id="${jobId}">
                     </td>
                     <td>${appliedDate}</td>
                     <td>${company}</td>
@@ -1285,15 +1466,15 @@ class SupabaseJobTracker {
                     </td>
                     <td>${location}</td>
                     <td class="status-cell">
-                        <select class="status-dropdown" data-id="${job.id}">
+                        <select class="status-dropdown" data-id="${jobId}">
                             ${statusOptions}
                         </select>
-                        <div class="status-date" data-id="${job.id}">
+                        <div class="status-date" data-id="${jobId}">
                             ${this.getLastStatusChangeDate(job)}
                         </div>
                     </td>
                     <td class="source-cell">
-                        <select class="source-dropdown" data-id="${job.id}">
+                        <select class="source-dropdown" data-id="${jobId}">
                             <option value="">Select Source</option>
                             ${sourceOptions}
                         </select>
@@ -1301,8 +1482,8 @@ class SupabaseJobTracker {
                     <td class="url-cell">${linkMarkup}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                        <i class="fas fa-edit action-icon edit" data-id="${job.id}" title="Edit job"></i>
-                        <i class="fas fa-trash action-icon delete" data-id="${job.id}" title="Delete job"></i>
+                        <i class="fas fa-edit action-icon edit" data-id="${jobId}" title="Edit job"></i>
+                        <i class="fas fa-trash action-icon delete" data-id="${jobId}" title="Delete job"></i>
                         </div>
                     </td>
                 </tr>
@@ -1327,10 +1508,10 @@ class SupabaseJobTracker {
             dropdown.addEventListener('change', async (e) => {
                 const target = e.currentTarget;
                 if (!target) return;
-                const id = target.dataset.id;
+                const id = this.getElementJobId(target);
                 if (!id) return;
                 
-                const job = this.jobs.find(j => j.id === id);
+                const job = this.jobs.find(j => this.idsMatch(j.id, id));
                 const previousStatus = job ? job.status : 'saved';
                 const newStatus = target.value;
                 
@@ -1365,10 +1546,10 @@ class SupabaseJobTracker {
             dropdown.addEventListener('change', async (e) => {
                 const target = e.currentTarget;
                 if (!target) return;
-                const id = target.dataset.id;
+                const id = this.getElementJobId(target);
                 if (!id) return;
                 
-                const job = this.jobs.find(j => j.id === id);
+                const job = this.jobs.find(j => this.idsMatch(j.id, id));
                 const previousSource = job ? job.source : '';
                 const newSource = target.value;
                 
@@ -1387,7 +1568,7 @@ class SupabaseJobTracker {
             comment.addEventListener('click', (e) => {
                 const target = e.currentTarget;
                 if (!target) return;
-                const id = target.dataset.id;
+                const id = this.getElementJobId(target);
                 if (id) {
                     this.openCommentModal(id);
                 }
@@ -1399,7 +1580,7 @@ class SupabaseJobTracker {
             editBtn.addEventListener('click', (e) => {
                 const target = e.currentTarget;
                 if (!target) return;
-                const id = target.dataset.id;
+                const id = this.getElementJobId(target);
                 if (id) {
                     this.editJob(id);
                 }
@@ -1411,10 +1592,13 @@ class SupabaseJobTracker {
             deleteBtn.addEventListener('click', async (e) => {
                 const target = e.currentTarget;
                 if (!target) return;
-                const id = target.dataset.id;
-                if (id) {
-                    await this.deleteJob(id);
+                const id = this.getElementJobId(target);
+                if (!id) {
+                    console.warn('Delete icon clicked but no job id found', target);
+                    alert('Unable to determine which job to delete. Please refresh and try again.');
+                    return;
                 }
+                await this.deleteJob(id);
             });
         });
     }
@@ -1422,7 +1606,12 @@ class SupabaseJobTracker {
     // Multi-select functionality
     getSelectedJobIds() {
         const checkboxes = document.querySelectorAll('.job-checkbox:checked');
-        return Array.from(checkboxes).map(cb => cb.dataset.id);
+        return Array.from(checkboxes)
+            .map(cb => {
+                const directId = this.normalizeId(cb.dataset.id);
+                return directId || this.getElementJobId(cb);
+            })
+            .filter(Boolean);
     }
 
     selectAllJobs(select) {
@@ -1571,57 +1760,142 @@ class SupabaseJobTracker {
         }
     }
 
+    exportToCSV(jobs, filename) {
+        if (!jobs || jobs.length === 0) {
+            alert('No jobs to export');
+            return;
+        }
+
+        const csv = convertToCSV(jobs);
+        downloadCSV(csv, filename);
+    }
+
+    async exportAllJobs() {
+        console.log('📥 Starting full backup export...');
+
+        // Get ALL jobs directly from Supabase to ensure we have the latest data
+        const { data: supabaseJobs, error } = await this.supabase
+            .from('jobs')
+            .select('*')
+            .order('applied_date', { ascending: false });
+
+        if (error) {
+            console.error('❌ Error fetching jobs from Supabase:', error);
+            alert('Error fetching jobs from database. Exporting local data instead.');
+            // Fallback to local data if Supabase fails
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `job-tracker-backup-${timestamp}.csv`;
+            this.exportToCSV(this.jobs, filename);
+            return;
+        }
+
+        console.log(`📊 Retrieved ${supabaseJobs.length} jobs from Supabase`);
+
+        // Check if there are any local-only jobs (not in Supabase)
+        const supabaseIds = new Set(supabaseJobs.map(j => j.id));
+        const localOnlyJobs = this.jobs.filter(j => !supabaseIds.has(j.id));
+
+        if (localOnlyJobs.length > 0) {
+            console.warn(`⚠️ Found ${localOnlyJobs.length} jobs in local but NOT in Supabase`);
+            console.warn('These jobs will be included in the backup but should be synced to Supabase!');
+            console.log('💡 Run syncMissingToSupabase() to sync these jobs');
+        }
+
+        // Combine Supabase jobs + any local-only jobs
+        const allJobs = [...supabaseJobs, ...localOnlyJobs];
+
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `job-tracker-backup-${timestamp}.csv`;
+
+        this.exportToCSV(allJobs, filename);
+
+        console.log(`✅ Exported ${allJobs.length} jobs to ${filename}`);
+        if (localOnlyJobs.length > 0) {
+            console.log(`   └─ Includes ${localOnlyJobs.length} local-only jobs (NOT in Supabase)`);
+        }
+
+        // Show alert if there are local-only jobs
+        if (localOnlyJobs.length > 0) {
+            alert(
+                `Backup created with ${allJobs.length} jobs.\n\n` +
+                `⚠️ Warning: ${localOnlyJobs.length} jobs are only in local memory (NOT in Supabase).\n\n` +
+                `Run syncMissingToSupabase() in console to sync them to the database.`
+            );
+        }
+    }
+
     async exportSelectedJobs() {
         const selectedIds = this.getSelectedJobIds();
         if (selectedIds.length === 0) {
             alert('Please select jobs to export');
             return;
         }
-        
-        const selectedJobs = this.jobs.filter(job => selectedIds.includes(job.id));
+
+        const selectedJobs = this.jobs.filter(job => selectedIds.includes(this.normalizeId(job.id)));
         this.exportToCSV(selectedJobs, `selected-jobs-${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     async deleteSelectedJobs() {
+        console.log('🗑️ deleteSelectedJobs called');
         const selectedIds = this.getSelectedJobIds();
+        console.log('Selected IDs:', selectedIds);
+
         if (selectedIds.length === 0) {
             alert('Please select jobs to delete');
             return;
         }
-        
+
         const confirmMsg = `Are you sure you want to delete ${selectedIds.length} job(s)? This cannot be undone.`;
+        console.log('Showing confirmation dialog...');
         if (!confirm(confirmMsg)) {
+            console.log('User cancelled deletion');
             return;
         }
-        
+        console.log('User confirmed deletion');
+
         let successCount = 0;
         let errorCount = 0;
-        
+
         for (const id of selectedIds) {
+            const normalizedId = this.normalizeId(id);
+            if (!normalizedId) {
+                console.warn('Skipping delete for selected row with missing id:', id);
+                continue;
+            }
             try {
                 const { error } = await this.supabase
                     .from('jobs')
                     .delete()
-                    .eq('id', id);
-                
+                    .eq('id', normalizedId);
+
                 if (error) {
-                    console.error('Error deleting job:', id, error);
+                    console.error('Error deleting job:', normalizedId, error);
                     errorCount++;
                 } else {
                     successCount++;
                 }
-        } catch (error) {
-                console.error('Error deleting job:', id, error);
+            } catch (error) {
+                console.error('Error deleting job:', normalizedId, error);
                 errorCount++;
             }
         }
-        
+
         // Reload jobs
         await this.loadJobs();
         this.renderJobs();
         this.updateStats();
         this.populateFilterOptions();
-        
+
+        // Clear all selections after deletion
+        const selectAllCheckbox = document.getElementById('select-all-checkbox');
+        if (selectAllCheckbox) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        }
+
+        // Update selection UI to hide delete button
+        this.updateSelectionUI();
+
         if (errorCount > 0) {
             alert(`Deleted ${successCount} job(s). ${errorCount} failed.`);
         } else {
@@ -1630,22 +1904,24 @@ class SupabaseJobTracker {
     }
 
     editJob(id) {
-        const job = this.jobs.find(j => j.id === id);
+        const normalizedId = this.normalizeId(id);
+        const job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
         if (!job) return;
         this.openAddJobModal(job);
     }
 
     openCommentModal(id) {
-        const job = this.jobs.find(j => j.id === id);
+        const normalizedId = this.normalizeId(id);
+        const job = this.jobs.find(j => this.idsMatch(j.id, normalizedId));
         if (!job) return;
 
-        this.currentCommentJobId = id;
+        this.currentCommentJobId = normalizedId;
         document.getElementById('comment-text').value = job.comments || '';
         document.getElementById('comment-modal').style.display = 'flex';
     }
 
     openAddJobModal(jobData = null) {
-        this.editingJobId = jobData ? jobData.id : null;
+        this.editingJobId = jobData ? this.normalizeId(jobData.id) : null;
         
         if (jobData) {
             // Pre-fill form with job data
@@ -1881,26 +2157,267 @@ class SupabaseJobTracker {
         const totalApplications = this.filteredJobs.length;
         const companies = new Set(this.filteredJobs.map(job => job.company).filter(Boolean)).size;
         const locations = new Set(this.filteredJobs.map(job => job.location).filter(Boolean)).size;
-        
-        // Calculate streak based on all jobs (not filtered)
-        const streak = this.calculateStreak();
-        
+
+        // Calculate comprehensive streak history based on all jobs (not filtered)
+        const streakHistory = this.calculateStreakHistory();
+
         document.getElementById('total-applications').textContent = totalApplications;
         document.getElementById('total-companies').textContent = companies;
         document.getElementById('total-locations').textContent = locations;
-        document.getElementById('current-streak').textContent = streak;
-        
+        document.getElementById('current-streak').textContent = streakHistory.currentStreak;
+        document.getElementById('highest-streak').textContent = streakHistory.highestStreak;
+
+        // Show notification if streak just broke
+        if (streakHistory.streakJustBroke && streakHistory.lastBreakDate) {
+            this.showStreakBreakNotification(streakHistory);
+        }
+
         // Update insights metrics (always uses all jobs)
         this.updateInsights();
-        
+
+        // Update pie charts
+        this.updatePieCharts();
+
         // Only update activity summary if not skipped (e.g., when clicking on a day)
         if (!skipActivityUpdate) {
             // Populate month selector
             this.populateMonthSelector();
-            
+
             // Update activity summary cards
             this.updateActivitySummary();
         }
+    }
+
+    updatePieCharts() {
+        this.renderJobTypePieChart();
+        this.renderLocationsPieChart();
+        this.renderCompaniesPieChart();
+        this.renderSourcesPieChart();
+    }
+
+    renderJobTypePieChart() {
+        const canvas = document.getElementById('job-type-chart');
+        if (!canvas) return;
+
+        // Filter to exclude jobs with "Saved" status (include everything else)
+        const activeJobs = this.jobs.filter(job =>
+            (job.status || '').toLowerCase() !== 'saved'
+        );
+
+        // Classify jobs as Product/Program vs SDE based on title
+        let productCount = 0;
+        let sdeCount = 0;
+
+        activeJobs.forEach(job => {
+            const title = (job.title || '').toLowerCase();
+            if (title.includes('product') || title.includes('program')) {
+                productCount++;
+            } else {
+                sdeCount++;
+            }
+        });
+
+        // Destroy existing chart if it exists
+        if (this.jobTypeChart) {
+            this.jobTypeChart.destroy();
+        }
+
+        // Create new chart
+        this.jobTypeChart = new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels: ['Product/Program', 'SDE/Other'],
+                datasets: [{
+                    data: [productCount, sdeCount],
+                    backgroundColor: ['#6366f1', '#10b981'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: this.getPieChartOptions()
+        });
+    }
+
+    renderLocationsPieChart() {
+        const canvas = document.getElementById('locations-chart');
+        if (!canvas) return;
+
+        // Filter to exclude jobs with "Saved" status (include everything else)
+        const activeJobs = this.jobs.filter(job =>
+            (job.status || '').toLowerCase() !== 'saved'
+        );
+
+        // Count jobs by location
+        const locationCounts = {};
+        activeJobs.forEach(job => {
+            const location = job.location || 'Unknown';
+            locationCounts[location] = (locationCounts[location] || 0) + 1;
+        });
+
+        // Convert to array and sort by count
+        const sortedLocations = Object.entries(locationCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8); // Top 8 locations
+
+        const labels = sortedLocations.map(([location]) => location);
+        const data = sortedLocations.map(([_, count]) => count);
+        const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+        // Destroy existing chart
+        if (this.locationsChart) {
+            this.locationsChart.destroy();
+        }
+
+        this.locationsChart = new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: colors,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: this.getPieChartOptions()
+        });
+    }
+
+    renderCompaniesPieChart() {
+        const canvas = document.getElementById('companies-chart');
+        if (!canvas) return;
+
+        // Filter to exclude jobs with "Saved" status (include everything else)
+        const activeJobs = this.jobs.filter(job =>
+            (job.status || '').toLowerCase() !== 'saved'
+        );
+
+        // Count jobs by company
+        const companyCounts = {};
+        activeJobs.forEach(job => {
+            const company = job.company || 'Unknown';
+            companyCounts[company] = (companyCounts[company] || 0) + 1;
+        });
+
+        // Filter companies with 3+ applications and sort by count
+        const topCompanies = Object.entries(companyCounts)
+            .filter(([_, count]) => count >= 3)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10); // Top 10 companies
+
+        // Destroy existing chart
+        if (this.companiesChart) {
+            this.companiesChart.destroy();
+        }
+
+        if (topCompanies.length === 0) {
+            // Show empty state
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '14px sans-serif';
+            ctx.fillStyle = '#999';
+            ctx.textAlign = 'center';
+            ctx.fillText('No companies with 3+ apps', canvas.width / 2, canvas.height / 2);
+            return;
+        }
+
+        const labels = topCompanies.map(([company]) => company);
+        const data = topCompanies.map(([_, count]) => count);
+        const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16'];
+
+        this.companiesChart = new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: colors,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: this.getPieChartOptions()
+        });
+    }
+
+    renderSourcesPieChart() {
+        const canvas = document.getElementById('sources-chart');
+        if (!canvas) return;
+
+        // Filter to exclude jobs with "Saved" status (include everything else)
+        const activeJobs = this.jobs.filter(job =>
+            (job.status || '').toLowerCase() !== 'saved'
+        );
+
+        // Count jobs by source
+        const sourceCounts = {};
+        activeJobs.forEach(job => {
+            const source = job.source || 'Unknown';
+            sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+        });
+
+        // Convert to array and sort by count
+        const sortedSources = Object.entries(sourceCounts)
+            .sort((a, b) => b[1] - a[1]);
+
+        const labels = sortedSources.map(([source]) => source);
+        const data = sortedSources.map(([_, count]) => count);
+        const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+        // Destroy existing chart
+        if (this.sourcesChart) {
+            this.sourcesChart.destroy();
+        }
+
+        this.sourcesChart = new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: colors,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: this.getPieChartOptions()
+        });
+    }
+
+    getPieChartOptions() {
+        return {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        padding: 15,
+                        font: {
+                            size: 12
+                        },
+                        color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#333'
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    padding: 12,
+                    cornerRadius: 8,
+                    displayColors: true,
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        };
     }
     
     showWeekBreakdownByDates(weekStartDate, weekEndDate, weekNumber = null) {
@@ -2423,60 +2940,243 @@ class SupabaseJobTracker {
     }
     
     calculateStreak() {
+        // This now returns just the current streak from comprehensive history
+        const history = this.calculateStreakHistory();
+        return history.currentStreak;
+    }
+
+    calculateStreakHistory() {
+        console.log('📊 Calculating comprehensive streak history...');
+
+        // Get all jobs with applied dates, excluding saved jobs
         const sortedJobs = [...this.jobs]
-            .filter(job => job.applied_date && job.status !== 'saved') // Exclude saved jobs from streak
-            .sort((a, b) => new Date(b.applied_date) - new Date(a.applied_date));
-        
-        if (sortedJobs.length === 0) return 0;
-        
-        let streak = 0;
-        let currentDate = new Date();
-        currentDate.setHours(0, 0, 0, 0);
-        
-        for (const job of sortedJobs) {
-            const jobDate = new Date(job.applied_date);
-            jobDate.setHours(0, 0, 0, 0);
-            
-            const daysDiff = Math.floor((currentDate - jobDate) / (1000 * 60 * 60 * 24));
-            
-            if (daysDiff === streak || (streak === 0 && daysDiff === 0)) {
-                streak = daysDiff + 1;
-                currentDate = jobDate;
-            } else if (daysDiff === streak + 1) {
-                streak++;
-                currentDate = jobDate;
+            .filter(job => job.applied_date && job.status !== 'saved')
+            .sort((a, b) => new Date(a.applied_date) - new Date(b.applied_date)); // Oldest first
+
+        if (sortedJobs.length === 0) {
+            return {
+                currentStreak: 0,
+                highestStreak: 0,
+                streakHistory: [],
+                lastBreakDate: null,
+                isActiveToday: false
+            };
+        }
+
+        // Get all unique dates with applications
+        const applicationDates = new Set();
+        sortedJobs.forEach(job => {
+            const date = new Date(job.applied_date);
+            date.setHours(0, 0, 0, 0);
+            applicationDates.add(date.getTime());
+        });
+
+        const sortedDates = Array.from(applicationDates)
+            .map(timestamp => new Date(timestamp))
+            .sort((a, b) => a - b);
+
+        console.log(`📅 Found ${sortedDates.length} unique application dates`);
+
+        // Find all streaks
+        const streaks = [];
+        let currentStreakStart = sortedDates[0];
+        let currentStreakEnd = sortedDates[0];
+
+        for (let i = 1; i < sortedDates.length; i++) {
+            const prevDate = sortedDates[i - 1];
+            const currDate = sortedDates[i];
+            const daysDiff = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
+
+            if (daysDiff === 1) {
+                // Consecutive day - extend current streak
+                currentStreakEnd = currDate;
             } else {
-                break;
+                // Gap found - save current streak and start new one
+                const streakLength = Math.floor((currentStreakEnd - currentStreakStart) / (1000 * 60 * 60 * 24)) + 1;
+                streaks.push({
+                    startDate: currentStreakStart.toISOString().split('T')[0],
+                    endDate: currentStreakEnd.toISOString().split('T')[0],
+                    length: streakLength,
+                    breakDuration: daysDiff - 1 // Days between streaks
+                });
+                currentStreakStart = currDate;
+                currentStreakEnd = currDate;
             }
         }
-        
-        return streak;
+
+        // Add the last streak
+        const lastStreakLength = Math.floor((currentStreakEnd - currentStreakStart) / (1000 * 60 * 60 * 24)) + 1;
+        streaks.push({
+            startDate: currentStreakStart.toISOString().split('T')[0],
+            endDate: currentStreakEnd.toISOString().split('T')[0],
+            length: lastStreakLength,
+            breakDuration: null // Last streak has no break after it yet
+        });
+
+        // Determine current active streak
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const lastApplicationDate = sortedDates[sortedDates.length - 1];
+        const daysSinceLastApplication = Math.floor((today - lastApplicationDate) / (1000 * 60 * 60 * 24));
+
+        let currentStreak = 0;
+        let isActiveToday = false;
+        let lastBreakDate = null;
+
+        if (daysSinceLastApplication === 0) {
+            // Applied today - streak is active
+            currentStreak = streaks[streaks.length - 1].length;
+            isActiveToday = true;
+        } else if (daysSinceLastApplication === 1) {
+            // Applied yesterday - streak is still technically active (grace period)
+            currentStreak = streaks[streaks.length - 1].length;
+            isActiveToday = false;
+        } else {
+            // Streak is broken
+            currentStreak = 0;
+            lastBreakDate = new Date(lastApplicationDate.getTime() + (1000 * 60 * 60 * 24)).toISOString().split('T')[0];
+
+            // Update the last streak's break duration if not already set
+            if (streaks.length > 0 && streaks[streaks.length - 1].breakDuration === null) {
+                streaks[streaks.length - 1].breakDuration = daysSinceLastApplication - 1;
+            }
+        }
+
+        // Find highest streak
+        const highestStreak = Math.max(...streaks.map(s => s.length));
+
+        // Load previous streak data to check if we need to notify about a break
+        const previousData = this.loadStreakData();
+        const streakJustBroke = previousData && previousData.currentStreak > 0 && currentStreak === 0 &&
+                                previousData.lastBreakDate !== lastBreakDate;
+
+        const history = {
+            currentStreak,
+            highestStreak,
+            streakHistory: streaks,
+            lastBreakDate,
+            isActiveToday,
+            streakJustBroke, // Flag to show notification
+            totalApplicationDays: sortedDates.length,
+            lastUpdated: new Date().toISOString()
+        };
+
+        console.log('🔥 Streak Analysis:', {
+            current: currentStreak,
+            highest: highestStreak,
+            totalStreaks: streaks.length,
+            isActive: isActiveToday,
+            lastBreak: lastBreakDate
+        });
+
+        // Save to localStorage
+        this.saveStreakData(history);
+
+        return history;
+    }
+
+    saveStreakData(data) {
+        try {
+            localStorage.setItem('streak_history', JSON.stringify(data));
+            console.log('💾 Streak data saved to localStorage');
+        } catch (error) {
+            console.error('❌ Error saving streak data:', error);
+        }
+    }
+
+    loadStreakData() {
+        try {
+            const data = localStorage.getItem('streak_history');
+            if (data) {
+                return JSON.parse(data);
+            }
+        } catch (error) {
+            console.error('❌ Error loading streak data:', error);
+        }
+        return null;
+    }
+
+    showStreakBreakNotification(streakHistory) {
+        console.log('💔 Showing streak break notification');
+
+        // Find the last completed streak before the break
+        const lastStreak = streakHistory.streakHistory[streakHistory.streakHistory.length - 2] ||
+                          streakHistory.streakHistory[streakHistory.streakHistory.length - 1];
+
+        if (!lastStreak) return;
+
+        const message = `Your ${lastStreak.length}-day streak ended on ${lastStreak.endDate}. Your highest streak is ${streakHistory.highestStreak} days. Keep going!`;
+
+        // Create a toast notification
+        const toast = document.createElement('div');
+        toast.className = 'streak-break-toast';
+        toast.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <i class="fas fa-fire-alt" style="font-size: 24px; color: #f59e0b;"></i>
+                <div>
+                    <div style="font-weight: 600; margin-bottom: 4px;">Streak Broken</div>
+                    <div style="font-size: 0.9rem; opacity: 0.9;">${message}</div>
+                </div>
+                <button onclick="this.parentElement.parentElement.remove()" style="margin-left: auto; background: none; border: none; color: white; cursor: pointer; font-size: 20px; padding: 0 8px;">&times;</button>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, 10000);
     }
 
     // Filter Options
     populateFilterOptions() {
-        const companies = [...new Set(this.jobs.map(job => job.company))].filter(Boolean);
-        const locations = [...new Set(this.jobs.map(job => job.location))].filter(Boolean);
-        const sources = [...new Set(this.jobs.map(job => job.source))].filter(Boolean);
+        console.log('🔄 Populating filter options from database...');
+        console.log('Total jobs in this.jobs:', this.jobs.length);
+
+        // Extract unique values from jobs in database, filter out empty values, and sort alphabetically
+        const companies = [...new Set(this.jobs.map(job => job.company))]
+            .filter(company => company && company.trim() !== '')
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+        const locations = [...new Set(this.jobs.map(job => job.location))]
+            .filter(location => location && location.trim() !== '')
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+        const sources = [...new Set(this.jobs.map(job => job.source))]
+            .filter(source => source && source.trim() !== '')
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+        console.log('📍 Unique locations found:', locations);
+        console.log('🏢 Unique companies found:', companies.length);
+        console.log('🌐 Unique sources found:', sources.length);
+
+        // Log warning if no locations found
+        if (locations.length === 0) {
+            console.warn('⚠️ No locations found in database. All jobs may have empty location fields.');
+        }
 
         // Update company filter
         const companyFilter = document.querySelector('[data-filter="company"] + .filter-dropdown');
         if (companyFilter) {
             companyFilter.innerHTML = `
                 <div class="filter-option" data-value="all">All Companies</div>
-                ${companies.map(company => 
-                    `<div class="filter-option" data-value="${company}">${company}</div>`
+                ${companies.map(company =>
+                    `<div class="filter-option" data-value="${this.sanitize(company)}">${this.sanitize(company)}</div>`
                 ).join('')}
             `;
         }
 
-        // Update location filter
+        // Update location filter - only shows locations that exist in the database
         const locationFilter = document.querySelector('[data-filter="location"] + .filter-dropdown');
         if (locationFilter) {
             locationFilter.innerHTML = `
                 <div class="filter-option" data-value="all">All Locations</div>
-                ${locations.map(location => 
-                    `<div class="filter-option" data-value="${location}">${location}</div>`
+                ${locations.map(location =>
+                    `<div class="filter-option" data-value="${this.sanitize(location)}">${this.sanitize(location)}</div>`
                 ).join('')}
             `;
         }
@@ -2486,11 +3186,13 @@ class SupabaseJobTracker {
         if (sourceFilter) {
             sourceFilter.innerHTML = `
                 <div class="filter-option" data-value="all">All Sources</div>
-                ${sources.map(source => 
-                    `<div class="filter-option" data-value="${source}">${source}</div>`
+                ${sources.map(source =>
+                    `<div class="filter-option" data-value="${this.sanitize(source)}">${this.sanitize(source)}</div>`
                 ).join('')}
             `;
         }
+
+        console.log(`📍 Filter options populated: ${companies.length} companies, ${locations.length} locations, ${sources.length} sources`);
     }
 }
 
@@ -2924,7 +3626,7 @@ function debugDashboard() {
     console.log('Supabase client:', jobTracker ? jobTracker.supabase : 'No jobTracker');
     console.log('Current jobs:', jobTracker ? jobTracker.jobs : 'No jobTracker');
     console.log('Filtered jobs:', jobTracker ? jobTracker.filteredJobs : 'No jobTracker');
-    
+
     if (jobTracker && jobTracker.jobs.length > 0) {
         console.log('Job details:');
         jobTracker.jobs.forEach((job, index) => {
@@ -2937,8 +3639,265 @@ function debugDashboard() {
             });
         });
     }
-    
+
     alert('Debug info logged to console. Press F12 to see the details.');
+}
+
+// Global function to normalize all existing entries
+async function normalizeAllExistingEntries() {
+    if (!jobTracker) {
+        alert('JobTracker not initialized. Please refresh the page and try again.');
+        return;
+    }
+
+    const confirmed = confirm(
+        'This will normalize all company names and locations in your database:\n\n' +
+        '• Remove state abbreviations from locations (e.g., "Seattle, WA" → "Seattle")\n' +
+        '• Capitalize first letter of each word in company names and locations\n\n' +
+        'Do you want to proceed?'
+    );
+
+    if (confirmed) {
+        await jobTracker.normalizeAllEntries();
+    }
+}
+
+// Diagnostic function to verify what's actually in the database
+async function verifyDatabaseData(jobId) {
+    if (!jobTracker) {
+        console.error('JobTracker not initialized');
+        return;
+    }
+
+    console.log('=== DATABASE VERIFICATION ===');
+
+    if (jobId) {
+        // Check specific job
+        const normalizedId = jobTracker.normalizeId(jobId);
+        console.log('Checking job ID:', normalizedId);
+
+        const { data, error } = await jobTracker.supabase
+            .from('jobs')
+            .select('*')
+            .eq('id', normalizedId)
+            .single();
+
+        if (error) {
+            console.error('Error fetching job:', error);
+            return;
+        }
+
+        console.log('Job data from database:', data);
+        console.log('Location:', data.location);
+        console.log('Company:', data.company);
+        console.log('Status:', data.status);
+    } else {
+        // Check all jobs
+        const { data, error } = await jobTracker.supabase
+            .from('jobs')
+            .select('id, company, location')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (error) {
+            console.error('Error fetching jobs:', error);
+            return;
+        }
+
+        console.log('Last 10 jobs from database:');
+        data.forEach((job, idx) => {
+            console.log(`${idx + 1}. ID: ${job.id} | Company: "${job.company}" | Location: "${job.location}"`);
+        });
+    }
+
+    console.log('=== END VERIFICATION ===');
+}
+
+// Compare local vs database data
+async function compareLocalVsDatabase() {
+    if (!jobTracker) {
+        console.error('JobTracker not initialized');
+        return;
+    }
+
+    console.log('=== COMPARING LOCAL VS DATABASE ===');
+
+    // Get data from Supabase
+    const { data: dbJobs, error } = await jobTracker.supabase
+        .from('jobs')
+        .select('id, company, location, status, title')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching from database:', error);
+        return;
+    }
+
+    console.log('📊 Total jobs in Supabase:', dbJobs.length);
+    console.log('📊 Total jobs in local (this.jobs):', jobTracker.jobs.length);
+
+    // Check localStorage backup
+    const localStorageData = localStorage.getItem('jobTrackerJobs');
+    const localJobs = localStorageData ? JSON.parse(localStorageData) : [];
+    console.log('📊 Total jobs in localStorage backup:', localJobs.length);
+
+    // Find discrepancies
+    const dbIds = new Set(dbJobs.map(j => j.id));
+    const localIds = new Set(jobTracker.jobs.map(j => j.id));
+
+    const onlyInDb = dbJobs.filter(j => !localIds.has(j.id));
+    const onlyInLocal = jobTracker.jobs.filter(j => !dbIds.has(j.id));
+
+    if (onlyInDb.length > 0) {
+        console.warn('⚠️ Jobs in database but NOT in local:', onlyInDb.length);
+        onlyInDb.forEach(job => console.log('  -', job.id, job.title, job.company, job.location));
+    }
+
+    if (onlyInLocal.length > 0) {
+        console.warn('🚨 CRITICAL: Jobs in local but NOT in database:', onlyInLocal.length);
+        console.warn('These jobs will be LOST if you close the page without syncing!');
+        onlyInLocal.forEach(job => console.log('  -', job.id, job.title, job.company, job.location));
+        console.log('\n💡 Run syncMissingToSupabase() to push these jobs to Supabase');
+    }
+
+    if (onlyInDb.length === 0 && onlyInLocal.length === 0) {
+        console.log('✅ All job IDs match between local and database');
+    }
+
+    // Check for data differences in matching jobs
+    let differences = 0;
+    dbJobs.forEach(dbJob => {
+        const localJob = jobTracker.jobs.find(j => j.id === dbJob.id);
+        if (localJob) {
+            if (dbJob.location !== localJob.location || dbJob.company !== localJob.company) {
+                console.warn(`⚠️ Data mismatch for job ${dbJob.id}:`);
+                console.log(`   DB:    Company="${dbJob.company}" Location="${dbJob.location}"`);
+                console.log(`   Local: Company="${localJob.company}" Location="${localJob.location}"`);
+                differences++;
+            }
+        }
+    });
+
+    if (differences === 0) {
+        console.log('✅ All matching jobs have identical data');
+    } else {
+        console.warn(`⚠️ Found ${differences} jobs with different data between local and database`);
+        console.log('💡 Tip: Run jobTracker.loadJobs() to refresh from database');
+    }
+
+    console.log('=== END COMPARISON ===');
+
+    return {
+        dbCount: dbJobs.length,
+        localCount: jobTracker.jobs.length,
+        onlyInDb: onlyInDb.length,
+        onlyInLocal: onlyInLocal.length,
+        missingJobs: onlyInLocal,
+        dataDifferences: differences
+    };
+}
+
+// Sync missing entries to Supabase
+async function syncMissingToSupabase() {
+    if (!jobTracker) {
+        console.error('JobTracker not initialized');
+        return;
+    }
+
+    console.log('=== SYNCING MISSING ENTRIES TO SUPABASE ===');
+
+    // First, compare to find missing jobs
+    const comparison = await compareLocalVsDatabase();
+
+    if (!comparison || comparison.onlyInLocal === 0) {
+        console.log('✅ No missing jobs to sync. All data is in Supabase!');
+        return;
+    }
+
+    const missingJobs = comparison.missingJobs;
+    console.log(`\n🔄 Found ${missingJobs.length} jobs to sync to Supabase`);
+
+    const confirmed = confirm(
+        `Found ${missingJobs.length} jobs in local memory but NOT in Supabase.\n\n` +
+        `Do you want to push these jobs to Supabase now?\n\n` +
+        `Jobs to sync:\n${missingJobs.map(j => `- ${j.title} at ${j.company}`).slice(0, 5).join('\n')}` +
+        (missingJobs.length > 5 ? `\n...and ${missingJobs.length - 5} more` : '')
+    );
+
+    if (!confirmed) {
+        console.log('❌ Sync cancelled by user');
+        return;
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+    const errors = [];
+
+    for (const job of missingJobs) {
+        try {
+            console.log(`📤 Syncing: ${job.title} at ${job.company}...`);
+
+            // Prepare job data (remove any local-only fields)
+            const jobData = {
+                title: job.title || '',
+                company: job.company || '',
+                location: job.location || '',
+                job_id: job.job_id || '',
+                status: job.status || 'saved',
+                applied_date: job.applied_date || new Date().toISOString().split('T')[0],
+                url: job.url || '',
+                description: job.description || '',
+                notes: job.notes || '',
+                comments: job.comments || '',
+                source: job.source || 'Manual Entry',
+                status_history: job.status_history || [],
+                created_at: job.created_at || new Date().toISOString()
+            };
+
+            // Don't include the ID - let Supabase generate a new one
+            const { data, error } = await jobTracker.supabase
+                .from('jobs')
+                .insert([jobData])
+                .select()
+                .single();
+
+            if (error) {
+                console.error(`❌ Failed to sync job:`, error);
+                errors.push({ job, error });
+                errorCount++;
+            } else {
+                console.log(`✅ Synced successfully with new ID: ${data.id}`);
+                successCount++;
+            }
+
+        } catch (err) {
+            console.error(`❌ Exception syncing job:`, err);
+            errors.push({ job, error: err });
+            errorCount++;
+        }
+    }
+
+    console.log('\n=== SYNC COMPLETE ===');
+    console.log(`✅ Successfully synced: ${successCount} jobs`);
+    console.log(`❌ Failed to sync: ${errorCount} jobs`);
+
+    if (errors.length > 0) {
+        console.error('Errors:', errors);
+    }
+
+    // Reload from Supabase to get the latest data
+    console.log('\n🔄 Reloading data from Supabase...');
+    await jobTracker.loadJobs();
+    jobTracker.renderJobs();
+    jobTracker.updateStats();
+    jobTracker.populateFilterOptions();
+
+    alert(
+        `Sync complete!\n\n` +
+        `✅ Synced: ${successCount} jobs\n` +
+        `❌ Failed: ${errorCount} jobs\n\n` +
+        `Page has been refreshed with latest Supabase data.`
+    );
 }
 
 function openAddJobModal() {
@@ -2958,12 +3917,13 @@ function closeCommentModal() {
 
 async function saveJob() {
     console.log('=== SAVE JOB FUNCTION CALLED ===');
-    
+    console.log('Timestamp:', new Date().toISOString());
+
     if (!jobTracker) {
         console.error('No jobTracker instance!');
         return;
     }
-    
+
     const formData = {
         title: document.getElementById('job-title').value,
         company: document.getElementById('job-company').value,
@@ -2973,13 +3933,17 @@ async function saveJob() {
         notes: document.getElementById('job-notes')?.value || '',
         status: document.getElementById('job-status').value
     };
-    
-    console.log('Form data:', formData);
+
+    console.log('Raw form data collected:', formData);
+    console.log('Is this an edit?', !!jobTracker.editingJobId);
+    if (jobTracker.editingJobId) {
+        console.log('Editing job ID:', jobTracker.editingJobId);
+    }
     
     if (jobTracker.editingJobId) {
         // UPDATE EXISTING JOB
         console.log('Updating existing job with ID:', jobTracker.editingJobId);
-        
+
         // Convert temp history to proper format (remove isOriginal, reverse for chronological order)
         const statusHistory = jobTracker.tempStatusHistory
             .filter(entry => !entry.isOriginal) // Remove original entry
@@ -2989,37 +3953,53 @@ async function saveJob() {
                 timestamp: entry.timestamp,
                 date: entry.date
             }));
-        
-        // Add status_history to the update
+
+        // Add status_history to the update and normalize company/location
         const updateData = {
             ...formData,
+            company: jobTracker.normalizeCompanyName(formData.company),
+            location: jobTracker.normalizeLocation(formData.location),
             status_history: statusHistory
         };
-        
+
+        console.log('=== UPDATE DEBUG ===');
+        console.log('Original form location:', formData.location);
+        console.log('Normalized location:', updateData.location);
+        console.log('Original form company:', formData.company);
+        console.log('Normalized company:', updateData.company);
+        console.log('Complete update data:', updateData);
+
         try {
+            const editingId = jobTracker.normalizeId(jobTracker.editingJobId);
+            console.log('Updating job with ID:', editingId);
+
             const { data, error } = await jobTracker.supabase
                 .from('jobs')
                 .update(updateData)
-                .eq('id', jobTracker.editingJobId)
+                .eq('id', editingId)
                 .select()
                 .single();
-            
+
             if (error) {
-                console.error('Update error:', error);
+                console.error('❌ Supabase update error:', error);
                 alert('Could not update job: ' + error.message);
                 return;
             }
-            
-            console.log('✅ Job updated in Supabase:', data);
+
+            console.log('✅ Job updated in Supabase successfully!');
+            console.log('Returned data from Supabase:', data);
+            console.log('Location in returned data:', data.location);
+            console.log('Company in returned data:', data.company);
             
             // Update local data
-            const jobIndex = jobTracker.jobs.findIndex(j => j.id === jobTracker.editingJobId);
+            const jobIndex = jobTracker.jobs.findIndex(j => jobTracker.idsMatch(j.id, editingId));
             if (jobIndex !== -1) {
                 jobTracker.jobs[jobIndex] = data;
             }
-            
+
             jobTracker.applyFilters();
             jobTracker.renderJobs();
+            jobTracker.populateFilterOptions(); // Refresh filter dropdowns
             alert('✅ Job updated successfully!');
         } catch (err) {
             console.error('Exception updating job:', err);
@@ -3060,11 +4040,13 @@ async function saveJob() {
             }
             
             console.log('✅ Job added to Supabase:', data);
-            
+
             // Add to local jobs array
             jobTracker.jobs.unshift(data);
             jobTracker.applyFilters();
-            
+            jobTracker.renderJobs();
+            jobTracker.populateFilterOptions(); // Refresh filter dropdowns
+
             alert('✅ Job added successfully!');
         } catch (err) {
             console.error('Exception adding job:', err);
@@ -3081,7 +4063,9 @@ function saveComment() {
     if (!jobTracker || !jobTracker.currentCommentJobId) return;
     
     const comment = document.getElementById('comment-text').value;
-    const job = jobTracker.jobs.find(j => j.id === jobTracker.currentCommentJobId);
+    const targetId = jobTracker.normalizeId(jobTracker.currentCommentJobId);
+    const job = jobTracker.jobs.find(j => jobTracker.idsMatch(j.id, targetId));
+    jobTracker.currentCommentJobId = targetId;
     
     if (job) {
         job.comments = comment;
@@ -3205,22 +4189,43 @@ function setupEventListeners() {
     document.getElementById('debug-btn')?.addEventListener('click', debugDashboard);
     document.getElementById('streak-btn')?.addEventListener('click', openStreakSettings);
     document.getElementById('import-csv-btn')?.addEventListener('click', importCSV);
-    
+
+    // Download CSV backup button
+    const downloadCsvBtn = document.getElementById('download-csv-btn');
+    console.log('download-csv-btn exists?', !!downloadCsvBtn);
+    if (downloadCsvBtn) {
+        downloadCsvBtn.addEventListener('click', () => {
+            console.log('📥 Download CSV button clicked!');
+            if (jobTracker) {
+                jobTracker.exportAllJobs();
+            } else {
+                console.error('jobTracker not initialized');
+                alert('Error: Job tracker not initialized. Please refresh the page.');
+            }
+        });
+        console.log('✅ Download CSV button event listener attached');
+    } else {
+        console.error('❌ Download CSV button not found in DOM!');
+    }
+
     // Delete selected button
-    document.getElementById('delete-selected-btn')?.addEventListener('click', async () => {
-        if (jobTracker) {
-            const selectedIds = jobTracker.getSelectedJobIds();
-            if (selectedIds.length === 0) {
-                alert('Please select jobs to delete');
-                return;
-            }
-            
-            const confirmed = confirm(`Are you sure you want to delete ${selectedIds.length} selected job(s)?`);
-            if (confirmed) {
+    const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+    console.log('delete-selected-btn exists?', !!deleteSelectedBtn);
+    if (deleteSelectedBtn) {
+        deleteSelectedBtn.addEventListener('click', async (e) => {
+            console.log('🗑️ Delete selected button clicked!');
+            e.preventDefault();
+            e.stopPropagation();
+            if (jobTracker) {
                 await jobTracker.deleteSelectedJobs();
+            } else {
+                console.error('jobTracker not initialized');
             }
-        }
-    });
+        });
+        console.log('✅ Delete selected button event listener attached');
+    } else {
+        console.error('❌ Delete selected button not found in DOM!');
+    }
     
     // Clear filters button
     const clearFiltersBtn = document.getElementById('clear-filters-btn');
@@ -3315,4 +4320,3 @@ function setupEventListeners() {
         saveComment();
     });
 }
-

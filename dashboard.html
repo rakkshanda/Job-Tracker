@@ -11,6 +11,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Google Charts for Sankey Diagram -->
     <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <!-- Chart.js for Pie Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -41,6 +43,10 @@
         <!-- Header Section -->
         <div class="header-section">
             <div class="action-buttons">
+                <button class="action-btn download-csv-btn" id="download-csv-btn">
+                    <i class="fas fa-download"></i>
+                    Download Backup (CSV)
+                </button>
                 <!-- <button class="action-btn import-btn" id="import-csv-btn">
                     <i class="fas fa-upload"></i>
                     Import CSV
@@ -55,7 +61,35 @@
         <!-- Insights Section -->
         <div class="insights-section" id="insights-section" style="display: none;">
             <h2 class="insights-title">Insights</h2>
-            
+
+            <!-- Pie Charts Section -->
+            <div class="pie-charts-section">
+                <div class="pie-chart-card">
+                    <h3 class="chart-title">Job Type</h3>
+                    <div class="chart-container">
+                        <canvas id="job-type-chart"></canvas>
+                    </div>
+                </div>
+                <div class="pie-chart-card">
+                    <h3 class="chart-title">Locations</h3>
+                    <div class="chart-container">
+                        <canvas id="locations-chart"></canvas>
+                    </div>
+                </div>
+                <div class="pie-chart-card">
+                    <h3 class="chart-title">Top Companies (3+)</h3>
+                    <div class="chart-container">
+                        <canvas id="companies-chart"></canvas>
+                    </div>
+                </div>
+                <div class="pie-chart-card">
+                    <h3 class="chart-title">Sources</h3>
+                    <div class="chart-container">
+                        <canvas id="sources-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
             <div class="insights-grid">
                 <!-- Performance Metrics -->
                 <div class="insights-category">
@@ -249,6 +283,9 @@
                 <div class="stat-content">
                     <div class="stat-number" id="current-streak">0</div>
                     <div class="stat-label">Days Current Streak</div>
+                    <div class="stat-sublabel" id="highest-streak-label" style="font-size: 0.75rem; color: #666; margin-top: 2px;">
+                        Best: <span id="highest-streak">0</span> days
+                    </div>
                 </div>
             </div>
         </div>

@@ -286,6 +286,21 @@ MIT License - feel free to use this for personal or commercial projects!
 
 ---
 
+## 💼 More Projects
+
+Check out my other projects:
+
+1. **[Delivery Chatbot](https://github.com/yourusername/delivery-chatbot)** - AI-powered delivery assistant chatbot
+2. **[Emerald](https://github.com/yourusername/emerald)** - [Project description]
+3. **[Folklore](https://github.com/yourusername/folklore)** - [Project description]
+4. **[Career Cupid](https://github.com/yourusername/career-cupid)** - Career matchmaking platform
+5. **[Revre XR](https://github.com/yourusername/revre-xr)** - Extended reality experience
+6. **[Hugging Face Project](https://github.com/yourusername/huggingface-project)** - ML/AI project using Hugging Face
+7. **[ClaimRunner](https://github.com/yourusername/claimrunner)** - Claims management system
+8. **Job Tracker Extension** (this project) - Chrome extension for tracking job applications
+
+---
+
 ## 🙏 Acknowledgments
 
 - Built with vanilla JavaScript (no frameworks!)
