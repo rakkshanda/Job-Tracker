@@ -1,5 +1,4 @@
-# Job Tracker (Chrome Extension)
-
+# Job Tracker
  Setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
 
 
