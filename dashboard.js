@@ -4148,10 +4148,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         // Initialize dark mode first
         initDarkMode();
-        
+
         jobTracker = new SupabaseJobTracker();
         console.log('Supabase JobTracker initialized successfully');
-        
+
+        // Initialize Pomodoro Timer with the Supabase client
+        window.pomodoroTimer = new PomodoroTimer(jobTracker.supabase);
+        console.log('Pomodoro Timer created with Supabase client');
+
         // Add event listeners to fix CSP issues
         setupEventListeners();
     } catch (error) {
@@ -4190,22 +4194,35 @@ function setupEventListeners() {
     document.getElementById('streak-btn')?.addEventListener('click', openStreakSettings);
     document.getElementById('import-csv-btn')?.addEventListener('click', importCSV);
 
-    // Download CSV backup button
+    // Download CSV backup buttons (both in header and insights section)
     const downloadCsvBtn = document.getElementById('download-csv-btn');
+    const downloadCsvBtnInsights = document.getElementById('download-csv-btn-insights');
+
     console.log('download-csv-btn exists?', !!downloadCsvBtn);
+    console.log('download-csv-btn-insights exists?', !!downloadCsvBtnInsights);
+
+    const handleDownloadClick = () => {
+        console.log('📥 Download CSV button clicked!');
+        if (jobTracker) {
+            jobTracker.exportAllJobs();
+        } else {
+            console.error('jobTracker not initialized');
+            alert('Error: Job tracker not initialized. Please refresh the page.');
+        }
+    };
+
     if (downloadCsvBtn) {
-        downloadCsvBtn.addEventListener('click', () => {
-            console.log('📥 Download CSV button clicked!');
-            if (jobTracker) {
-                jobTracker.exportAllJobs();
-            } else {
-                console.error('jobTracker not initialized');
-                alert('Error: Job tracker not initialized. Please refresh the page.');
-            }
-        });
-        console.log('✅ Download CSV button event listener attached');
+        downloadCsvBtn.addEventListener('click', handleDownloadClick);
+        console.log('✅ Download CSV button (header) event listener attached');
     } else {
-        console.error('❌ Download CSV button not found in DOM!');
+        console.error('❌ Download CSV button (header) not found in DOM!');
+    }
+
+    if (downloadCsvBtnInsights) {
+        downloadCsvBtnInsights.addEventListener('click', handleDownloadClick);
+        console.log('✅ Download CSV button (insights) event listener attached');
+    } else {
+        console.error('❌ Download CSV button (insights) not found in DOM!');
     }
 
     // Delete selected button
@@ -4319,4 +4336,401 @@ function setupEventListeners() {
         e.preventDefault();
         saveComment();
     });
+
+    // Pomodoro Timer initialization
+    if (window.pomodoroTimer) {
+        window.pomodoroTimer.init();
+    }
+}
+
+// Pomodoro Timer Class
+class PomodoroTimer {
+    constructor(supabase) {
+        this.supabase = supabase;
+        this.timerInterval = null;
+        this.remainingSeconds = 0;
+        this.totalSeconds = 0;
+        this.isRunning = false;
+        this.currentDuration = 30; // Default
+        this.focusNote = ''; // Store focus note
+        this.timerStartTime = null; // Track when timer actually started
+    }
+
+    init() {
+        console.log('🍅 Initializing Pomodoro Timer...');
+
+        // Check if there's a timer in progress
+        this.loadTimerState();
+
+        // Load today's sessions
+        this.loadTodaySessions();
+
+        // Event listeners
+        const startBtn = document.getElementById('start-timer-btn');
+        const stopBtn = document.getElementById('stop-timer-btn');
+        const toggleBtn = document.getElementById('pomodoro-toggle-btn');
+
+        console.log('Button elements:', {
+            startBtn: !!startBtn,
+            stopBtn: !!stopBtn,
+            toggleBtn: !!toggleBtn
+        });
+
+        if (startBtn) {
+            startBtn.addEventListener('click', () => this.startTimer());
+            console.log('✅ Start button listener attached');
+        }
+
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => {
+                console.log('🛑 Stop button clicked (event listener)');
+                this.showCancelModal();
+            });
+            console.log('✅ Stop button listener attached');
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => this.toggleSection());
+            console.log('✅ Toggle button listener attached');
+        }
+
+        // Cancel/Stop timer modal listeners
+        document.getElementById('stop-timer-yes')?.addEventListener('click', () => {
+            this.hideCancelModal();
+            this.stopAndSaveTimer();
+        });
+
+        document.getElementById('cancel-timer-yes')?.addEventListener('click', () => {
+            this.hideCancelModal();
+            this.cancelTimer();
+        });
+
+        document.getElementById('cancel-timer-continue')?.addEventListener('click', () => {
+            this.hideCancelModal();
+        });
+
+        document.getElementById('close-cancel-timer-modal')?.addEventListener('click', () => {
+            this.hideCancelModal();
+        });
+
+        console.log('✅ Pomodoro timer initialized');
+    }
+
+    toggleSection() {
+        const section = document.getElementById('pomodoro-section');
+        const btn = document.getElementById('pomodoro-toggle-btn');
+        const insightsSection = document.getElementById('insights-section');
+        const sankeySection = document.getElementById('sankey-section');
+        const insightsBtn = document.getElementById('insights-toggle-btn');
+        const sankeyBtn = document.getElementById('sankey-toggle-btn');
+
+        if (section.style.display === 'none') {
+            // Show pomodoro, hide others
+            section.style.display = 'block';
+            btn.classList.add('active');
+            btn.querySelector('span').textContent = 'Hide Pomodoro';
+
+            insightsSection.style.display = 'none';
+            sankeySection.style.display = 'none';
+            insightsBtn.classList.remove('active');
+            sankeyBtn.classList.remove('active');
+            insightsBtn.querySelector('span').textContent = 'Insights';
+            sankeyBtn.querySelector('span').textContent = 'Sankey';
+        } else {
+            // Hide pomodoro
+            section.style.display = 'none';
+            btn.classList.remove('active');
+            btn.querySelector('span').textContent = 'Pomodoro';
+        }
+    }
+
+    startTimer() {
+        const duration = parseInt(document.getElementById('timer-duration').value);
+        const focusNote = document.getElementById('focus-note').value.trim();
+
+        this.currentDuration = duration;
+        this.totalSeconds = duration * 60;
+        this.remainingSeconds = this.totalSeconds;
+        this.focusNote = focusNote;
+        this.timerStartTime = Date.now();
+
+        // Hide setup, show timer
+        document.getElementById('timer-setup').style.display = 'none';
+        document.getElementById('timer-display').style.display = 'flex';
+
+        // Start the timer
+        this.isRunning = true;
+        this.updateTimerDisplay();
+        this.saveTimerState();
+
+        this.timerInterval = setInterval(() => {
+            this.remainingSeconds--;
+            this.updateTimerDisplay();
+            this.saveTimerState();
+
+            if (this.remainingSeconds <= 0) {
+                this.completeTimer();
+            }
+        }, 1000);
+
+        console.log(`🍅 Timer started: ${duration} minutes, Focus: "${focusNote}"`);
+    }
+
+    showCancelModal() {
+        console.log('🛑 Showing cancel timer modal');
+        const modal = document.getElementById('cancel-timer-modal');
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+    }
+
+    hideCancelModal() {
+        console.log('✅ Hiding cancel timer modal');
+        const modal = document.getElementById('cancel-timer-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    async stopAndSaveTimer() {
+        console.log('🛑 Stopping timer and saving progress');
+
+        // Calculate actual time focused (in minutes)
+        const timeElapsed = Math.ceil((this.totalSeconds - this.remainingSeconds) / 60);
+
+        console.log(`⏱️ Time focused: ${timeElapsed} minutes out of ${this.currentDuration} planned`);
+
+        this.clearTimer();
+
+        // Save partial session to Supabase
+        if (timeElapsed > 0) {
+            await this.saveSession(timeElapsed, this.focusNote, true); // true = stopped early
+        }
+
+        // Reset UI
+        this.resetUI();
+
+        // Reload today's sessions
+        await this.loadTodaySessions();
+    }
+
+    cancelTimer() {
+        console.log('❌ Cancelling timer without saving');
+        this.clearTimer();
+        this.resetUI();
+    }
+
+    async completeTimer() {
+        console.log('🍅 Timer completed!');
+        this.clearTimer();
+
+        // Save to Supabase (full duration completed)
+        await this.saveSession(this.currentDuration, this.focusNote, false); // false = completed fully
+
+        // Show completion notification
+        this.showCompletionNotification();
+
+        // Reset UI
+        this.resetUI();
+
+        // Reload today's sessions
+        await this.loadTodaySessions();
+    }
+
+    clearTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+        this.isRunning = false;
+        localStorage.removeItem('pomodoro_timer_state');
+    }
+
+    resetUI() {
+        document.getElementById('timer-setup').style.display = 'flex';
+        document.getElementById('timer-display').style.display = 'none';
+        // Clear the focus note input
+        document.getElementById('focus-note').value = '';
+    }
+
+    updateTimerDisplay() {
+        const minutes = Math.floor(this.remainingSeconds / 60);
+        const seconds = this.remainingSeconds % 60;
+
+        const timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        document.getElementById('timer-time').textContent = timeString;
+
+        // Update circular progress
+        const progress = 1 - (this.remainingSeconds / this.totalSeconds);
+        const circumference = 2 * Math.PI * 130; // radius is 130
+        const offset = circumference * (1 - progress);
+
+        const circle = document.getElementById('timer-progress-circle');
+        circle.style.strokeDashoffset = offset;
+    }
+
+    saveTimerState() {
+        const state = {
+            remainingSeconds: this.remainingSeconds,
+            totalSeconds: this.totalSeconds,
+            currentDuration: this.currentDuration,
+            focusNote: this.focusNote,
+            timerStartTime: this.timerStartTime,
+            startTime: Date.now()
+        };
+        localStorage.setItem('pomodoro_timer_state', JSON.stringify(state));
+    }
+
+    loadTimerState() {
+        const stateData = localStorage.getItem('pomodoro_timer_state');
+        if (!stateData) return;
+
+        const state = JSON.parse(stateData);
+        const elapsedSeconds = Math.floor((Date.now() - state.startTime) / 1000);
+        const adjustedRemaining = state.remainingSeconds - elapsedSeconds;
+
+        if (adjustedRemaining > 0) {
+            // Resume the timer
+            this.currentDuration = state.currentDuration;
+            this.totalSeconds = state.totalSeconds;
+            this.remainingSeconds = adjustedRemaining;
+            this.focusNote = state.focusNote || '';
+            this.timerStartTime = state.timerStartTime || state.startTime;
+
+            // Update UI
+            document.getElementById('timer-setup').style.display = 'none';
+            document.getElementById('timer-display').style.display = 'flex';
+
+            this.isRunning = true;
+            this.updateTimerDisplay();
+
+            // Continue countdown
+            this.timerInterval = setInterval(() => {
+                this.remainingSeconds--;
+                this.updateTimerDisplay();
+                this.saveTimerState();
+
+                if (this.remainingSeconds <= 0) {
+                    this.completeTimer();
+                }
+            }, 1000);
+
+            console.log(`🍅 Resumed timer from previous session - Focus: "${this.focusNote}"`);
+        } else {
+            // Timer expired while page was closed
+            localStorage.removeItem('pomodoro_timer_state');
+        }
+    }
+
+    async saveSession(durationMinutes, focusNote = '', stoppedEarly = false) {
+        try {
+            const { data, error } = await this.supabase
+                .from('pomodoro_sessions')
+                .insert([{
+                    duration_minutes: durationMinutes,
+                    focus_note: focusNote,
+                    stopped_early: stoppedEarly,
+                    completed_at: new Date().toISOString()
+                }])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            console.log('✅ Session saved to Supabase:', data);
+        } catch (error) {
+            console.error('❌ Error saving session:', error);
+            alert('Failed to save session to database. Please check your connection.');
+        }
+    }
+
+    async loadTodaySessions() {
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayISO = today.toISOString();
+
+            const { data, error } = await this.supabase
+                .from('pomodoro_sessions')
+                .select('*')
+                .gte('completed_at', todayISO)
+                .order('completed_at', { ascending: false });
+
+            if (error) throw error;
+
+            this.displayTodaySessions(data || []);
+        } catch (error) {
+            console.error('❌ Error loading sessions:', error);
+            this.displayTodaySessions([]);
+        }
+    }
+
+    displayTodaySessions(sessions) {
+        const totalSessions = sessions.length;
+        const totalMinutes = sessions.reduce((sum, s) => sum + s.duration_minutes, 0);
+
+        document.getElementById('sessions-count').textContent = totalSessions;
+        document.getElementById('sessions-total-time').textContent = totalMinutes;
+
+        const sessionsList = document.getElementById('sessions-list');
+
+        if (sessions.length === 0) {
+            sessionsList.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No sessions completed today</p>';
+            return;
+        }
+
+        sessionsList.innerHTML = sessions.map(session => {
+            const completedTime = new Date(session.completed_at).toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+
+            const statusBadge = session.stopped_early
+                ? '<span style="background: #fbbf24; color: #78350f; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 8px;">STOPPED</span>'
+                : '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 8px;">COMPLETED</span>';
+
+            const focusNote = session.focus_note
+                ? `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem; font-style: italic;">${session.focus_note}</div>`
+                : '';
+
+            return `
+                <div class="session-item">
+                    <div>
+                        <div style="display: flex; align-items: center;">
+                            <span class="session-duration">${session.duration_minutes} minutes</span>
+                            ${statusBadge}
+                        </div>
+                        ${focusNote}
+                    </div>
+                    <div class="session-time">Completed at ${completedTime}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    showCompletionNotification() {
+        const toast = document.createElement('div');
+        toast.className = 'streak-break-toast';
+        toast.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        toast.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <i class="fas fa-check-circle" style="font-size: 24px; color: white;"></i>
+                <div>
+                    <div style="font-weight: 600; margin-bottom: 4px;">Timer Complete!</div>
+                    <div style="font-size: 0.9rem; opacity: 0.9;">Great work! You completed ${this.currentDuration} minutes of focused work.</div>
+                </div>
+                <button onclick="this.parentElement.parentElement.remove()" style="margin-left: auto; background: none; border: none; color: white; cursor: pointer; font-size: 20px; padding: 0 8px;">&times;</button>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, 5000);
+    }
 }
