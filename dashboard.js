@@ -1228,13 +1228,31 @@ class SupabaseJobTracker {
                 return;
             }
 
-            console.log('=== DELETING JOB ===');
-            console.log('Job to delete:', job.title);
-            console.log('Job ID:', job.id);
+            console.log('=== DELETING JOB (modal) ===');
+            console.log('Job to delete:', job.title, 'ID:', job.id);
 
-            if (!confirm('Are you sure you want to delete this job?')) {
-                return;
-            }
+            // Show modal and wait for confirmation
+            const confirmed = await new Promise((resolve) => {
+                const modal = document.getElementById('delete-job-modal');
+                const btnConfirm = document.getElementById('confirm-delete-job');
+                const btnCancel = document.getElementById('cancel-delete-job');
+                const btnClose = document.getElementById('close-delete-job-modal');
+                if (!modal) return resolve(false);
+
+                const cleanup = () => {
+                    btnConfirm?.removeEventListener('click', onYes);
+                    btnCancel?.removeEventListener('click', onNo);
+                    btnClose?.removeEventListener('click', onNo);
+                };
+                const onYes = () => { cleanup(); modal.style.display = 'none'; resolve(true); };
+                const onNo = () => { cleanup(); modal.style.display = 'none'; resolve(false); };
+                btnConfirm?.addEventListener('click', onYes, { once: true });
+                btnCancel?.addEventListener('click', onNo, { once: true });
+                btnClose?.addEventListener('click', onNo, { once: true });
+                modal.style.display = 'flex';
+            });
+
+            if (!confirmed) return;
 
             const { error } = await this.supabase
                 .from('jobs')
