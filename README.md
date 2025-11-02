@@ -1,5 +1,5 @@
 # Job Tracker
- Setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
+Setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
 
 
 ## 🚀 Installation
@@ -82,3 +82,12 @@ on public.pomodoro_sessions (completed_at desc);
 
 ---
 
+## Notes
+- Do not commit `config.js` (gitignored).
+- Policies above are permissive for dev; tighten for production.
+
+## Deploy on Vercel (optional)
+- Static deploy for viewing/testing pages.
+- Routes: `/` (index), `/dashboard` → `dashboard.html`, `/test` → `test-supabase.html`.
+- Set Vercel env vars `ENV_SUPABASE_URL` and `ENV_SUPABASE_KEY`.
+- Build step generates `config.js` from those envs (`scripts/generate-config.js`).

@@ -2389,6 +2389,8 @@ class SupabaseJobTracker {
     }
 
     getPieChartOptions() {
+        const isDark = document.body.classList.contains('dark-mode');
+        const textColor = isDark ? '#e2e8f0' : (getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#333');
         return {
             responsive: true,
             maintainAspectRatio: true,
@@ -2400,13 +2402,13 @@ class SupabaseJobTracker {
                         font: {
                             size: 12
                         },
-                        color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#333'
+                        color: textColor
                     }
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    titleColor: '#fff',
-                    bodyColor: '#fff',
+                    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(0, 0, 0, 0.8)',
+                    titleColor: textColor,
+                    bodyColor: textColor,
                     padding: 12,
                     cornerRadius: 8,
                     displayColors: true,
@@ -4146,7 +4148,7 @@ function updateThemeIcon(isDark) {
     }
 }
 
-// Initialize the application
+    // Initialize the application
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('DOM loaded, initializing Supabase JobTracker...');
     try {
@@ -4162,6 +4164,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Add event listeners to fix CSP issues
         setupEventListeners();
+
+        // Rebuild insight charts on theme toggle for better contrast
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
+            try {
+                if (jobTracker) {
+                    jobTracker.renderJobTypePieChart?.();
+                    jobTracker.renderLocationsPieChart?.();
+                    jobTracker.renderCompaniesPieChart?.();
+                    jobTracker.renderSourcesPieChart?.();
+                }
+                if (window.pomodoroTimer) {
+                    // re-render pomodoro category pie for current day
+                    window.pomodoroTimer.loadTodaySessions?.();
+                }
+            } catch (e) {
+                console.warn('Theme toggle re-render failed:', e);
+            }
+        });
     } catch (error) {
         console.error('Error initializing Supabase JobTracker:', error);
     }
@@ -4916,16 +4936,17 @@ class PomodoroTimer {
             // Format duration
             const durationDisplay = secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`;
 
-            // Determine icon type based on duration and status
-            let iconClass = '';
-            let icon = '';
-            if (session.stopped_early) {
-                iconClass = 'stopped';
-                icon = '<i class="fas fa-pause"></i>';
-            } else {
-                iconClass = 'completed';
-                icon = '<i class="fas fa-check"></i>';
-            }
+            // Category-based icon
+            const cat = session.category || 'job-app';
+            const categoryIconMap = {
+                'job-app': 'fas fa-briefcase',
+                'portfolio': 'fas fa-folder',
+                'projects': 'fas fa-code',
+                'networking': 'fas fa-users'
+            };
+            const iconClassName = categoryIconMap[cat] || 'fas fa-circle-dot';
+            let iconClass = `${session.stopped_early ? 'stopped' : 'completed'} ${cat}`;
+            let icon = `<i class="${iconClassName}"></i>`;
 
             // Add duration-based styling
             if (mins >= 60) {
@@ -4953,7 +4974,7 @@ class PomodoroTimer {
             // Delete button (X for all sessions)
             const deleteButton = `
                 <div class="timeline-check stopped" data-session-id="${session.id}" title="Delete session">
-                    <i class="fas fa-times"></i>
+                    <i class=\"fas fa-times\"></i>
                 </div>
             `;
 
