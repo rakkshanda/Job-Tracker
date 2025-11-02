@@ -1,17 +1,15 @@
 # Job Tracker
-Setup for saving job applications to Supabase and using the built‑in Pomodoro tracker.
+Step‑by‑step guide to set up Supabase, configure the app, and run the dashboard (locally and on Vercel).
 
 
-## 🚀 Installation
+## 1) Create Supabase project
+- Go to supabase.com → New project
+- Open Settings → API and note:
+  - Project URL (use as `ENV_SUPABASE_URL`)
+  - anon public key (use as `ENV_SUPABASE_KEY`)
 
-
-
-### Quick Start
-
-- Copy `config.example.js` → `config.js`, set:
-  - `window.ENV_SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co'`
-  - `window.ENV_SUPABASE_KEY = 'YOUR_ANON_PUBLIC_KEY'`
-- In Supabase SQL Editor, create tables:
+## 2) Create tables (SQL)
+- In Supabase SQL Editor, run the following:
 
 ```sql
 CREATE TABLE jobs (
@@ -71,23 +69,39 @@ create index if not exists idx_pomodoro_sessions_completed_at
 on public.pomodoro_sessions (completed_at desc);
 ```
 
-- Load extension: `chrome://extensions` → Enable Developer Mode → Load unpacked → select project folder.
+## 3) Clone the repo
+```bash
+git clone https://github.com/yourusername/save-jobs-extension.git
+cd save-jobs-extension
+```
 
----
+## 4) Configure Supabase in the app
+- Copy `config.example.js` → `config.js`
+- Edit `config.js`:
+  - `window.ENV_SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co'`
+  - `window.ENV_SUPABASE_KEY = 'YOUR_ANON_PUBLIC_KEY'`
+- Note: `config.js` is gitignored. Do not commit secrets.
 
-## Use
-- Popup: scrape or enter a job → Save (writes to Supabase).
-- Dashboard: view/filter jobs, export CSV, toggle dark mode.
-- Pomodoro: start a timer (10/15/30/45/60/90m), view sessions by day (left sidebar), see category pie.
+## 5) Load the Chrome extension (local)
+- Open Chrome → `chrome://extensions`
+- Toggle Developer mode (top‑right)
+- Click “Load unpacked” → select this project folder
 
----
+## 6) Open and use
+- Popup: scrape or enter a job → Save (writes to Supabase)
+- Dashboard: open via the extension button
+- Pomodoro:
+  - Start a timer (30s, 10/15/30/45/60/90m)
+  - While running, category tabs + note input are shown
+  - On stop/complete, they hide; session saves to Supabase
+  - Left sidebar: pick a day to review sessions
+  - Category pie: shows time by category for selected day
+
+## Deploy on Vercel (optional)
+- Set Vercel env vars `ENV_SUPABASE_URL` and `ENV_SUPABASE_KEY`.
+- Build generates `config.js` from env vars (scripts/generate-config.js).
+- Routes: `/` (index), `/dashboard` → `dashboard.html`, `/test` → `test-supabase.html`.
 
 ## Notes
 - Do not commit `config.js` (gitignored).
 - Policies above are permissive for dev; tighten for production.
-
-## Deploy on Vercel (optional)
-- Static deploy for viewing/testing pages.
-- Routes: `/` (index), `/dashboard` → `dashboard.html`, `/test` → `test-supabase.html`.
-- Set Vercel env vars `ENV_SUPABASE_URL` and `ENV_SUPABASE_KEY`.
-- Build step generates `config.js` from those envs (`scripts/generate-config.js`).
