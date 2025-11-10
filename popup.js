@@ -1,4 +1,33 @@
 const $ = (id) => document.getElementById(id);
+// Buffer incoming messages until DOM + listeners are ready
+let popupReady = false;
+const pendingMessages = [];
+let loadingTimer = null;
+const LOADING_TIMEOUT_MS = 7000;
+
+function startLoading() {
+  try {
+    document.getElementById('loadingMask').style.display = 'flex';
+    ['company','title','location','jobId','url','description'].forEach(id => {
+      const el = $(id);
+      if (el) {
+        el.classList.add('skeleton-loading');
+        if (el.placeholder !== undefined) el.placeholder = 'Loading…';
+      }
+    });
+  } catch {}
+}
+
+function stopLoading() {
+  try {
+    document.getElementById('loadingMask').style.display = 'none';
+    ['company','title','location','jobId','url','description'].forEach(id => {
+      const el = $(id);
+      if (el) el.classList.remove('skeleton-loading');
+    });
+  } catch {}
+}
+
 const DRAFT_KEY = 'saveJobsDraft';
 const isStandalone = location.hash.includes('standalone') || location.search.includes('standalone=1');
 
@@ -54,7 +83,6 @@ function sanitizeCommas(s = "", allowCommas = false) {
   return s.replace(/,/g, "").trim(); // Remove all commas from other fields
 }
 
-
 async function getTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -65,29 +93,103 @@ async function runInPage(tabId, func, args = []) {
   return result;
 }
 
+// 🔧 Scrape current page using injected scrape.js and enforce TikTok jobId
 async function scrapeFromPage(tabId) {
   console.log('Starting scrapeFromPage for tab:', tabId);
   
+  // Inject scrape.js so window.__scrapeJob exists
   await chrome.scripting.executeScript({ target: { tabId }, files: ['scrape.js'] });
-  const scrapedData = runInPage(tabId, () => window.__scrapeJob?.() || {});
+
+  // IMPORTANT: await runInPage so we get the actual object, not a Promise
+  const scrapedData = await runInPage(tabId, () => {
+    const data = window.__scrapeJob?.() || {};
+    try {
+      const href = location.href || '';
+
+      // TikTok referral override: enforce company + jobId
+      if (href.startsWith('https://lifeattiktok.com/referral/tiktok/')) {
+        data.company = 'TikTok';
+
+        // Derive jobId from path if missing
+        if (!data.jobId && !data.job_id) {
+          const parts = location.pathname.split('/').filter(Boolean);
+          // e.g. /referral/tiktok/A122000 → ['referral','tiktok','A122000']
+          if (parts.length >= 3) data.jobId = parts[2];
+        }
+
+        // Last-ditch fallback: try to extract "Job ID: X" from page text
+        if (!data.jobId && !data.job_id) {
+          const fullText = (document.body.innerText || '').trim();
+          const match = fullText.match(/Job ID[:\s]*([A-Za-z0-9\-]+)/i);
+          if (match && match[1]) data.jobId = match[1];
+        }
+      }
+    } catch (e) {
+      // Ignore errors; we still return whatever we have
+    }
+    return data;
+  });
   
   console.log('Raw scraped data:', scrapedData);
   
-  // Get page content for ChatGPT enhancement
+  // Get page content for potential future use
   const pageContent = await runInPage(tabId, () => {
-    // Get the main content area, focusing on job-related sections
     const jobContent = document.querySelector('.jobs-unified-top-card, .job-details-jobs-unified-top-card, main, .jobs-description-content') || document.body;
     return jobContent.innerText || document.body.innerText || '';
   });
   
   console.log('Page content length:', pageContent.length);
-  
-  // Enhance with ChatGPT if needed
-  const enhancedData = await enhanceJobDataWithChatGPT(pageContent, scrapedData);
-  console.log('Enhanced data:', enhancedData);
-  
-  return enhancedData;
+  console.log('[AI] Enhancement disabled. Using scraped data only.');
+  return scrapedData || {};
 }
+
+// Central message handler for data coming from the floating iframe parent
+function handleParentMessage(event) {
+  const msg = event.data || {};
+  if (!popupReady) {
+    pendingMessages.push(msg);
+    return; // will be processed once ready
+  }
+  if (msg.type === 'SCRAPING_STARTED') {
+    // show loading and set a timeout fail-safe
+    startLoading();
+    if (loadingTimer) clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(() => {
+      stopLoading();
+      const st = document.getElementById('status');
+      if (st) st.textContent = "Couldn't auto-fill. Try Redo.";
+    }, LOADING_TIMEOUT_MS);
+  } else if (msg.type === 'SCRAPED_DATA' && msg.data) {
+    if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+    stopLoading();
+    const d = msg.data || {};
+    // Only populate when data is complete enough
+    const complete = !!(d.title && d.company && d.location && d.description);
+    if (!complete) {
+      console.log('[Popup] Incomplete data received; keeping placeholders and populating best-effort.');
+    }
+    $('company').value = d.company || $('company').value;
+    $('title').value = d.title || $('title').value;
+    $('location').value = d.location || $('location').value;
+    $('jobId').value = d.job_id || d.jobId || $('jobId').value;
+    $('url').value = d.url || $('url').value;
+    $('description').value = d.description || $('description').value;
+    markMissing();
+    saveDraft();
+  }
+}
+
+// Attach early listener to buffer messages arriving before DOM ready
+window.addEventListener('message', handleParentMessage);
+
+// When DOM is ready, mark ready and flush any buffered messages
+document.addEventListener('DOMContentLoaded', () => {
+  popupReady = true;
+  // Process any pending messages in order
+  while (pendingMessages.length) {
+    handleParentMessage({ data: pendingMessages.shift() });
+  }
+});
 
 async function getMetaGuess(tabId) {
   return runInPage(tabId, () => {
@@ -188,7 +290,6 @@ function companyFromHost(host) {
     'gun.io': '',
     'codementor.io': '',
     'mentorcruise.com': '',
-    'codementor.io': '',
     'hackerrank.com': '',
     'leetcode.com': '',
     'codewars.com': '',
@@ -209,23 +310,6 @@ function companyFromHost(host) {
     'instagram.com': '',
     'youtube.com': '',
     'tiktok.com': '',
-    'snapchat.com': '',
-    'pinterest.com': '',
-    'reddit.com': '',
-    'discord.com': '',
-    'slack.com': '',
-    'zoom.us': '',
-    'teams.microsoft.com': '',
-    'webex.com': '',
-    'gotomeeting.com': '',
-    'skype.com': '',
-    'whatsapp.com': '',
-    'telegram.org': '',
-    'signal.org': '',
-    'viber.com': '',
-    'line.me': '',
-    'wechat.com': '',
-    'kik.com': '',
     'snapchat.com': '',
     'pinterest.com': '',
     'reddit.com': '',
@@ -268,106 +352,6 @@ function guessLocationFromText(text) {
 function getWebAppUrl() {
   // Your deployed Google Apps Script Web App URL
   return 'https://script.google.com/macros/s/AKfycbzYdQ1COnYE_LhnAOTE8hPNh7hVwDYsHRXUwn9JFzlys9ocL3EH7V3JP5p_D9mNU_GkUA/exec';
-}
-
-// ChatGPT API configuration
-// IMPORTANT: Add your OpenAI API key in the extension options page
-// Or set it here for development (never commit real keys!)
-const CHATGPT_API_KEY = ''; // Leave empty - configure in options
-const CHATGPT_API_URL = 'https://api.openai.com/v1/chat/completions';
-
-// Enhanced job data extraction using ChatGPT
-async function enhanceJobDataWithChatGPT(pageContent, scrapedData) {
-  try {
-    // Only use ChatGPT if we have incomplete data or if scraping failed
-    const hasIncompleteData = !scrapedData.title || !scrapedData.company || !scrapedData.location || !scrapedData.description || scrapedData.description.length < 100;
-    
-    if (!hasIncompleteData) {
-      return scrapedData;
-    }
-
-    const prompt = `Extract job information from this LinkedIn job posting content. Return ONLY a JSON object with these exact fields: company, title, location, description. If any field cannot be determined, use empty string.
-
-IMPORTANT: Pay special attention to LOCATION extraction. Look for:
-- City, State/Province combinations (e.g., "San Francisco, CA", "New York, NY")
-- Remote work indicators ("Remote", "Hybrid", "Work from home", "WFH")
-- Country names ("United States", "Canada", "UK", "Europe", "India")
-- Office locations and addresses
-- Work arrangement types (Remote, Hybrid, On-site, Onsite)
-
-Content to analyze:
-${pageContent.substring(0, 8000)}
-
-Current scraped data (may be incomplete):
-Company: ${scrapedData.company || 'Not found'}
-Title: ${scrapedData.title || 'Not found'}
-Location: ${scrapedData.location || 'Not found'}
-Description: ${scrapedData.description ? scrapedData.description.substring(0, 200) + '...' : 'Not found'}
-
-Focus especially on finding the LOCATION field. Look for location information in:
-- Job headers and subtitles
-- Company information sections
-- Job description text
-- Any location-related metadata
-
-Please provide a clean JSON response with the most accurate job information you can extract, with special attention to location details.`;
-
-    const response = await fetch(CHATGPT_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${CHATGPT_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a job data extraction expert. Extract job information from LinkedIn job postings and return clean, accurate data in JSON format.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 1000,
-        temperature: 0.1
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('ChatGPT API request failed:', response.status);
-      return scrapedData;
-    }
-
-    const data = await response.json();
-    const chatGPTResponse = data.choices?.[0]?.message?.content;
-
-    if (!chatGPTResponse) {
-      return scrapedData;
-    }
-
-    try {
-      // Try to parse the JSON response
-      const enhancedData = JSON.parse(chatGPTResponse);
-      
-      // Merge with existing data, preferring ChatGPT results for missing fields
-      return {
-        company: enhancedData.company || scrapedData.company || '',
-        title: enhancedData.title || scrapedData.title || '',
-        location: enhancedData.location || scrapedData.location || '',
-        url: scrapedData.url || '',
-        description: enhancedData.description || scrapedData.description || '',
-        _aiEnhanced: true // Flag to indicate AI was used
-      };
-    } catch (parseError) {
-      console.warn('Failed to parse ChatGPT response:', parseError);
-      return scrapedData;
-    }
-  } catch (error) {
-    console.warn('ChatGPT enhancement failed:', error);
-    return scrapedData;
-  }
 }
 
 // Supabase configuration
@@ -492,8 +476,6 @@ async function saveRow(payload) {
 }
 
 async function notifyDashboardRefresh() {
-  // No longer needed - just save to Supabase
-  // Dashboard will show data when user manually refreshes
   console.log('Job saved to Supabase');
 }
 
@@ -511,6 +493,7 @@ function clearFields() {
   $('location').value = '';
   $('jobId').value = '';
   $('status').value = 'saved'; // Reset to default
+  $('status').disabled = false;
   $('url').value = '';
   $('description').value = '';
   
@@ -524,11 +507,9 @@ function clearFields() {
   ['company','title','location','jobId','url'].forEach(id => {
     $(id).classList.remove('missing');
   });
-  
-  // Clear status
-  $('status').textContent = '';
 }
 
+// Main popup init
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Popup DOMContentLoaded - Initializing...');
   console.log('📍 Save button exists?', !!$('save'));
@@ -539,10 +520,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Will be populated by postMessage from floating button
   let scrapedData = null;
   
-  // Add skeleton loading to all inputs
+  // Skeleton loading helpers
   function showSkeletonLoading() {
     console.log('💀 Showing skeleton loading animation');
-    const fields = ['company', 'title', 'location', 'url', 'description', 'source'];
+    const fields = ['company', 'title', 'location', 'url', 'description', 'source', 'status'];
     fields.forEach(id => {
       const field = $(id);
       if (field) {
@@ -552,10 +533,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
-  // Remove skeleton loading from all inputs
   function hideSkeletonLoading() {
     console.log('✅ Hiding skeleton loading animation');
-    const fields = ['company', 'title', 'location', 'url', 'description', 'source'];
+    const fields = ['company', 'title', 'location', 'url', 'description', 'source', 'status'];
     fields.forEach(id => {
       const field = $(id);
       if (field) {
@@ -575,49 +555,72 @@ document.addEventListener('DOMContentLoaded', async () => {
     return 'URL';
   }
   
-  // Listen for scraped data from floating button
+  // Listen for scraped data from floating button (main path)
   window.addEventListener('message', (event) => {
     console.log('📨 Received message:', event.data);
     
-    // Start loading animation
     if (event.data && event.data.type === 'SCRAPING_STARTED') {
       console.log('🔄 Scraping started...');
       showSkeletonLoading();
+      if ($('status')) { $('status').disabled = false; $('status').value = 'saved'; }
       return;
     }
     
     if (event.data && event.data.type === 'SCRAPED_DATA') {
       console.log('📦 Received scraped data from floating button:', event.data.data);
-      scrapedData = event.data.data;
+      scrapedData = event.data.data || {};
       
-      // Remove skeleton loading
       hideSkeletonLoading();
       
+      if ($('status')) {
+        $('status').disabled = false;
+        $('status').value = 'saved';
+      }
+
+      // 🔐 Ensure TikTok jobId is present if this is a TikTok referral URL
+      try {
+        const urlStr = scrapedData.url || '';
+        if (urlStr.startsWith('https://lifeattiktok.com/referral/tiktok/')) {
+          scrapedData.company = scrapedData.company || 'TikTok';
+
+          if (!scrapedData.job_id && !scrapedData.jobId) {
+            const urlObj = new URL(urlStr);
+            const parts = urlObj.pathname.split('/').filter(Boolean);
+            // /referral/tiktok/A122000 -> ['referral','tiktok','A122000']
+            if (parts.length >= 3) {
+              scrapedData.jobId = parts[2];
+            }
+          }
+
+          // Final fallback: try to parse from description text
+          if (!scrapedData.job_id && !scrapedData.jobId && scrapedData.description) {
+            const match = scrapedData.description.match(/Job ID[:\s]*([A-Za-z0-9\-]+)/i);
+            if (match && match[1]) {
+              scrapedData.jobId = match[1];
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Populate form with scraped data
       if (scrapedData && scrapedData.title) {
         console.log('✅ Populating form with scraped data');
         $('company').value = sanitizeCommas(scrapedData.company || '');
         $('title').value = sanitizeCommas(scrapedData.title || '');
         $('location').value = sanitizeCommas(scrapedData.location || '');
-        $('jobId').value = sanitizeCommas(scrapedData.jobId || '');
+        $('jobId').value = sanitizeCommas(scrapedData.job_id || scrapedData.jobId || '');
         $('description').value = scrapedData.description || '';
         $('url').value = scrapedData.url || '';
         
-        // Auto-detect and set source
         const detectedSource = detectSource(scrapedData.url);
         $('source').value = detectedSource;
         console.log('🔍 Auto-detected source:', detectedSource);
-        console.log('🆔 Job ID:', scrapedData.jobId || 'Not found');
+        console.log('🆔 Job ID:', scrapedData.job_id || scrapedData.jobId || 'Not found');
         
-        // Show success indicator
-        const aiStatus = $('ai-status');
-        if (aiStatus) {
-          aiStatus.textContent = '✅ Data loaded';
-          aiStatus.style.display = 'block';
-          setTimeout(() => {
-            aiStatus.style.display = 'none';
-          }, 2000);
-        }
+      } else {
+        console.log('⚠️ Scraped data missing title; not auto-populating.');
       }
     }
   });
@@ -626,24 +629,72 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!scrapedData) {
     const currentUrl = tab.url || '';
     $('url').value = currentUrl;
-    // Auto-detect source from current URL
     $('source').value = detectSource(currentUrl);
   }
 
-  // If opened as sticky editor, avoid auto-closing expectations
   if (isStandalone) {
     document.title = 'Save Job — Sticky Editor';
   }
 
-  // Initialize draggable functionality
+  // Draggable
   const dragHandle = $('dragHandle');
   if (dragHandle) {
-    // Mouse events
-    dragHandle.addEventListener('mousedown', startDrag);
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    function startDrag(e) {
+      isDragging = true;
+      const rect = document.body.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+    }
+
+    function drag(e) {
+      if (!isDragging) return;
+      const x = e.clientX - offsetX;
+      const y = e.clientY - offsetY;
+      document.body.style.position = 'fixed';
+      document.body.style.left = x + 'px';
+      document.body.style.top = y + 'px';
+    }
+
+    function stopDrag() {
+      isDragging = false;
+      savePosition();
+    }
+
+    function savePosition() {
+      const rect = document.body.getBoundingClientRect();
+      try {
+        chrome.storage?.local?.set?.({
+          popupPosition: { left: rect.left, top: rect.top }
+        });
+      } catch {}
+    }
+
+    async function restorePosition() {
+      try {
+        const data = await new Promise((resolve) => {
+          try {
+            chrome.storage?.local?.get?.('popupPosition', (res) => resolve(res?.popupPosition));
+          } catch { resolve(null); }
+        });
+        if (data) {
+          document.body.style.position = 'fixed';
+          document.body.style.left = data.left + 'px';
+          document.body.style.top = data.top + 'px';
+        }
+      } catch {}
+    }
+
+    dragHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startDrag(e);
+    });
     document.addEventListener('mousemove', drag);
     document.addEventListener('mouseup', stopDrag);
     
-    // Touch events for mobile
     dragHandle.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const touch = e.touches[0];
@@ -656,11 +707,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.addEventListener('touchend', stopDrag);
     
-    // Restore previous position
-    restorePosition();
+    await restorePosition();
   }
 
-  // Form starts empty - will be populated by postMessage from floating button
+  // Form starts empty - will be populated by messages or redo
   console.log('ℹ️ Popup ready. Waiting for scraped data from floating button...');
   $('company').value    = '';
   $('title').value      = '';
@@ -674,26 +724,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       meta.ogSite ||
       meta.twitterSite ||
       companyFromHost(new URL(tab.url).hostname) ||
-      // Try to parse "City of X" / org name from title
       (meta.title.match(/\b(?:City|County|State|University|College) of [A-Za-z ]+/i)?.[0] || '')
     );
   }
   if (!$('location').value) {
     $('location').value = sanitizeCommas(
       guessLocationFromText($('description').value || meta.ogTitle || meta.title) ||
-      // if it's an Auburn gov page, default to Auburn, WA
       (/auburnwa\.gov|neogov|governmentjobs\.com/i.test(tab.url) ? 'Auburn, WA' : '')
     );
   }
 
-  // Restore any in-progress draft (survives popup close)
   await restoreDraft();
 
   // live counter
   const updateCount = () => $('descCount').textContent = `${$('description').value.length} chars`;
   updateCount();
   $('description').addEventListener('input', () => {
-    // live-clean on paste: remove hard line breaks visually
     const cur = $('description').value;
     const cleaned = cur.replace(/\r/g, '').replace(/\s*\n+\s*/g, ' ');
     if (cur !== cleaned) $('description').value = cleaned;
@@ -703,7 +749,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // persist on any field change and sanitize commas in real-time
   ['company','title','location','jobId','url'].forEach(id => {
     $(id).addEventListener('input', (e) => {
-      // Remove commas in real-time for non-description fields
       const originalValue = e.target.value;
       const sanitizedValue = sanitizeCommas(originalValue);
       if (originalValue !== sanitizedValue) {
@@ -724,221 +769,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   const guessCompanyBtn = $('guessCompany');
   if (guessCompanyBtn) {
     guessCompanyBtn.onclick = () => {
-    $('company').value ||= sanitizeCommas(
-      companyFromHost(new URL(tab.url).hostname) ||
-      meta.ogSite || meta.twitterSite ||
-      (meta.title.match(/\b(?:City|County|State|University|College) of [A-Za-z ]+/i)?.[0] || '')
-    );
-    markMissing();
+      $('company').value ||= sanitizeCommas(
+        companyFromHost(new URL(tab.url).hostname) ||
+        meta.ogSite || meta.twitterSite ||
+        (meta.title.match(/\b(?:City|County|State|University|College) of [A-Za-z ]+/i)?.[0] || '')
+      );
+      markMissing();
     };
   }
   
   const guessLocationBtn = $('guessLocation');
   if (guessLocationBtn) {
     guessLocationBtn.onclick = () => {
-    $('location').value ||= sanitizeCommas(
-      guessLocationFromText($('description').value || meta.ogTitle || meta.title) ||
-      (/auburnwa\.gov|neogov|governmentjobs\.com/i.test(tab.url) ? 'Auburn, WA' : '')
-    );
-    markMissing();
-    };
-  }
-
-  // AI-powered location extraction
-  const guessLocationAIBtn = $('guessLocationAI');
-  if (guessLocationAIBtn) {
-    guessLocationAIBtn.onclick = async () => {
-    const button = $('guessLocationAI');
-    const originalText = button.textContent;
-    
-    try {
-      button.textContent = '🤖 Finding location...';
-      button.classList.add('ai-loading');
-      button.style.pointerEvents = 'none';
-      
-      // Show AI status loading
-      $('ai-status').textContent = '🤖 AI is analyzing location...';
-      $('ai-status').classList.add('ai-status-loading');
-      
-      // Add processing animation to location field
-      $('location').classList.add('ai-processing');
-      
-      // Get page content for location extraction
-      const pageContent = await runInPage(tab.id, () => {
-        const jobContent = document.querySelector('.jobs-unified-top-card, .job-details-jobs-unified-top-card, main, .jobs-description-content') || document.body;
-        return jobContent.innerText || document.body.innerText || '';
-      });
-      
-      // Create a focused prompt just for location extraction
-      const locationPrompt = `Extract ONLY the job location from this LinkedIn job posting content. Return ONLY a JSON object with this exact field: location. If location cannot be determined, use empty string.
-
-IMPORTANT: Look specifically for:
-- City, State/Province combinations (e.g., "San Francisco, CA", "New York, NY")
-- Remote work indicators ("Remote", "Hybrid", "Work from home", "WFH")
-- Country names ("United States", "Canada", "UK", "Europe", "India")
-- Office locations and addresses
-- Work arrangement types (Remote, Hybrid, On-site, Onsite)
-
-Content to analyze:
-${pageContent.substring(0, 6000)}
-
-Focus ONLY on finding location information. Look in job headers, subtitles, company info, and job description.`;
-
-      const response = await fetch(CHATGPT_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CHATGPT_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a location extraction expert. Extract job location information from LinkedIn job postings and return clean, accurate location data in JSON format.'
-            },
-            {
-              role: 'user',
-              content: locationPrompt
-            }
-          ],
-          max_tokens: 200,
-          temperature: 0.1
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const chatGPTResponse = data.choices?.[0]?.message?.content;
-        
-        if (chatGPTResponse) {
-          try {
-            const enhancedData = JSON.parse(chatGPTResponse);
-            if (enhancedData.location) {
-              $('location').value = sanitizeCommas(enhancedData.location);
-              markMissing();
-              
-              // Show success status
-              $('ai-status').textContent = '✅ Location found with AI';
-              $('ai-status').classList.remove('ai-status-loading');
-              setTimeout(() => {
-                $('ai-status').textContent = '🤖 Enhanced with AI';
-                $('ai-status').classList.remove('ai-status-loading');
-              }, 2000);
-            } else {
-              $('ai-status').textContent = '❌ No location found';
-              $('ai-status').classList.remove('ai-status-loading');
-            }
-          } catch (parseError) {
-            console.warn('Failed to parse location response:', parseError);
-            $('ai-status').textContent = '❌ Failed to parse AI response';
-            $('ai-status').classList.remove('ai-status-loading');
-          }
-        } else {
-          $('ai-status').textContent = '❌ No AI response received';
-          $('ai-status').classList.remove('ai-status-loading');
-        }
-      } else {
-        $('ai-status').textContent = '❌ AI request failed';
-        $('ai-status').classList.remove('ai-status-loading');
-      }
-      
-    } catch (error) {
-      console.error('AI location extraction failed:', error);
-      $('status').textContent = 'AI location extraction failed. Please try again.';
-      $('ai-status').textContent = '❌ AI error occurred';
-      $('ai-status').classList.remove('ai-status-loading');
-    } finally {
-      button.textContent = originalText;
-      button.classList.remove('ai-loading');
-      button.style.pointerEvents = 'auto';
-      $('location').classList.remove('ai-processing');
-    }
-    };
-  }
-
-  // Manual AI enhancement button
-  const enhanceWithAIBtn = $('enhanceWithAI');
-  if (enhanceWithAIBtn) {
-    enhanceWithAIBtn.onclick = async () => {
-    const button = $('enhanceWithAI');
-    const originalText = button.textContent;
-    
-    try {
-      button.textContent = '🤖 Enhancing all fields...';
-      button.classList.add('ai-loading');
-      button.style.pointerEvents = 'none';
-      
-      // Show AI status loading
-      $('ai-status').textContent = '🤖 AI is analyzing job data...';
-      $('ai-status').classList.add('ai-status-loading');
-      
-      // Add processing animation to all form fields
-      $('company').classList.add('ai-processing');
-      $('title').classList.add('ai-processing');
-      $('location').classList.add('ai-processing');
-      $('description').classList.add('ai-processing');
-      
-      // Get current form data
-      const currentData = {
-        company: $('company').value.trim(),
-        title: $('title').value.trim(),
-        location: $('location').value.trim(),
-        jobId: $('jobId').value.trim(),
-        status: $('status').value,
-        url: $('url').value.trim(),
-        description: $('description').value.trim()
-      };
-      
-      // Get fresh page content
-      const pageContent = await runInPage(tab.id, () => {
-        const jobContent = document.querySelector('.jobs-unified-top-card, .job-details-jobs-unified-top-card, main, .jobs-description-content') || document.body;
-        return jobContent.innerText || document.body.innerText || '';
-      });
-      
-      // Enhance with ChatGPT
-      const enhancedData = await enhanceJobDataWithChatGPT(pageContent, currentData);
-      
-      // Update form fields with enhanced data
-      let fieldsUpdated = 0;
-      if (enhancedData.company) { $('company').value = sanitizeCommas(enhancedData.company); fieldsUpdated++; }
-      if (enhancedData.title) { $('title').value = sanitizeCommas(enhancedData.title); fieldsUpdated++; }
-      if (enhancedData.location) { $('location').value = sanitizeCommas(enhancedData.location); fieldsUpdated++; }
-      if (enhancedData.description) { $('description').value = enhancedData.description; fieldsUpdated++; }
-      
-      // Show success status
-      if (fieldsUpdated > 0) {
-        $('ai-status').textContent = `✅ Enhanced ${fieldsUpdated} field${fieldsUpdated > 1 ? 's' : ''} with AI`;
-        $('ai-status').classList.remove('ai-status-loading');
-        setTimeout(() => {
-          $('ai-status').textContent = '🤖 Enhanced with AI';
-          $('ai-status').classList.remove('ai-status-loading');
-        }, 3000);
-      } else {
-        $('ai-status').textContent = '❌ No improvements found';
-        $('ai-status').classList.remove('ai-status-loading');
-      }
-      
-      // Update character count
-      $('descCount').textContent = `${$('description').value.length} chars`;
-      
+      $('location').value ||= sanitizeCommas(
+        guessLocationFromText($('description').value || meta.ogTitle || meta.title) ||
+        (/auburnwa\.gov|neogov|governmentjobs\.com/i.test(tab.url) ? 'Auburn, WA' : '')
+      );
       markMissing();
-      
-    } catch (error) {
-      console.error('AI enhancement failed:', error);
-      $('status').textContent = 'AI enhancement failed. Please try again.';
-      $('ai-status').textContent = '❌ AI enhancement failed';
-      $('ai-status').classList.remove('ai-status-loading');
-    } finally {
-      button.textContent = originalText;
-      button.classList.remove('ai-loading');
-      button.style.pointerEvents = 'auto';
-      // Remove processing animations from all form fields
-      $('company').classList.remove('ai-processing');
-      $('title').classList.remove('ai-processing');
-      $('location').classList.remove('ai-processing');
-      $('description').classList.remove('ai-processing');
-    }
     };
   }
 
@@ -947,13 +794,10 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
   if (sticky) {
     sticky.onclick = async () => {
       try {
-        // persist current form first
         saveDraft();
         const url = chrome.runtime.getURL('popup.html#standalone');
-        // open in a new tab (works without extra permissions)
         await chrome.tabs.create({ url });
       } catch {
-        // as a fallback, try a popup window (may require permissions)
         const url = chrome.runtime.getURL('popup.html#standalone');
         try { chrome.windows.create({ url, type: 'popup', width: 440, height: 700 }); } catch {}
       }
@@ -972,12 +816,12 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
     const btn = $('save');
     const progress = $('progress');
     const setStatus = (type, msg) => {
-      $('status').textContent = msg || '';
+      const statusEl = $('statusMessage');
+      if (statusEl) statusEl.textContent = msg || '';
       btn.classList.remove('saving','success','error');
       if (type) btn.classList.add(type);
     };
   
-    // assemble payload (you already normalize desc in saveRow)
     const payload = {
       company: $('company').value.trim(),
       title: $('title').value.trim(),
@@ -989,7 +833,6 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
       description: $('description').value.trim()
     };
   
-    // basic required fields check
     const missingTitle = !payload.title;
     const missingUrl = !payload.url;
     const hint = $('validationHint');
@@ -1005,44 +848,35 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
     }
   
     try {
-      // SAVING STATE
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Saving…';
       setStatus('saving', 'Saving to Supabase…');
       progress.style.width = '35%';
   
-      // fire request
       await saveRow(payload);
       try { chrome.storage?.local?.remove?.(DRAFT_KEY); } catch {}
-      // fake a tiny progress finish so it feels smooth
       progress.style.width = '100%';
   
-      // Notify parent window (floating button) that job was saved
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'JOB_SAVED' }, '*');
         console.log('📤 Sent JOB_SAVED message to parent window');
       }
   
-      // SUCCESS STATE
       setTimeout(() => {
         btn.innerHTML = 'Saved ✓';
         setStatus('success', 'Saved to Supabase & Dashboard!');
-        // Automatically clear fields after successful save
         clearFields();
       }, 150);
 
-      // settle & reset progress bar for next time
       setTimeout(() => {
         btn.disabled = false;
         btn.classList.remove('saving','error');
         btn.classList.add('success');
         progress.style.width = '0%';
-        // keep "Saved ✓" for a moment then restore label
         setTimeout(() => { btn.classList.remove('success'); btn.textContent = 'Save Job'; }, 1200);
       }, 600);
   
     } catch (e) {
-      // ERROR STATE
       btn.disabled = false;
       btn.textContent = 'Save Job';
       progress.style.width = '0%';
@@ -1070,38 +904,40 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
     redoBtn.addEventListener('click', async () => {
       console.log('🔄 Redo button clicked!');
       try {
-      // Clear fields first
-      clearFields();
+        clearFields();
+        const statusMsg = $('statusMessage');
+        if (statusMsg) statusMsg.textContent = 'Refetching job data...';
       
-      // Show loading state
-      $('status').textContent = 'Refetching job data...';
+        const tab = await getTab();
+        const scrapedData = await scrapeFromPage(tab.id);
       
-      // Get current tab and refetch data
-      const tab = await getTab();
-      const scrapedData = await scrapeFromPage(tab.id);
-      
-      if (scrapedData) {
-        // Fill form with scraped data
-        $('company').value = sanitizeCommas(scrapedData.company || '');
-        $('title').value = sanitizeCommas(scrapedData.title || '');
-        $('location').value = sanitizeCommas(scrapedData.location || '');
-        $('url').value = sanitizeCommas(scrapedData.url || tab.url || '');
-        $('description').value = cleanWhitespace(scrapedData.description || '');
+        if (scrapedData) {
+          $('company').value = sanitizeCommas(scrapedData.company || '');
+          $('title').value = sanitizeCommas(scrapedData.title || '');
+          $('location').value = sanitizeCommas(scrapedData.location || '');
+          $('url').value = sanitizeCommas(scrapedData.url || tab.url || '');
+          $('description').value = cleanWhitespace(scrapedData.description || '');
+          $('jobId').value = sanitizeCommas(scrapedData.job_id || scrapedData.jobId || '');
         
-        // Update character count
-        updateCount();
+          updateCount();
         
-        $('status').textContent = 'Job data refetched successfully!';
-        setTimeout(() => $('status').textContent = '', 2000);
-      } else {
-        $('status').textContent = 'No job data found on this page';
-        setTimeout(() => $('status').textContent = '', 2000);
+          if (statusMsg) {
+            statusMsg.textContent = 'Job data refetched successfully!';
+            setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+          }
+        } else {
+          if (statusMsg) {
+            statusMsg.textContent = 'No job data found on this page';
+            setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+          }
+        }
+      } catch (error) {
+        console.error('Error refetching job data:', error);
+        if (statusMsg) {
+          statusMsg.textContent = 'Error refetching data';
+          setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+        }
       }
-    } catch (error) {
-      console.error('Error refetching job data:', error);
-      $('status').textContent = 'Error refetching data';
-      setTimeout(() => $('status').textContent = '', 2000);
-    }
     });
   } else {
     console.error('❌ Redo button not found!');
@@ -1113,11 +949,9 @@ Focus ONLY on finding location information. Look in job headers, subtitles, comp
     console.log('✅ Close button found, attaching event listener');
     closeBtn.addEventListener('click', () => {
       console.log('❌ Close button clicked!');
-      // If in standalone mode (floating popup), send message to close
       if (isStandalone || location.search.includes('standalone=1')) {
         window.parent.postMessage({ type: 'CLOSE_POPUP' }, '*');
       } else {
-        // Regular popup - just close the window
         window.close();
       }
     });

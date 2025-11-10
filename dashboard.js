@@ -4200,10 +4200,135 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.warn('Theme toggle re-render failed:', e);
             }
         });
+        // Countdown banner: days remaining to 20 Dec 2025
+        try {
+            const target = new Date('2025-12-20T00:00:00');
+            const today = new Date();
+            const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            const end = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+            const msPerDay = 24 * 60 * 60 * 1000;
+            const diffDays = Math.ceil((end - start) / msPerDay);
+            const numberEl = document.getElementById('countdown-text');
+            const subEl = document.getElementById('countdown-subtext');
+            if (numberEl) {
+                if (diffDays > 0) {
+                    numberEl.textContent = `${diffDays}`;
+                    if (subEl) subEl.textContent = 'days to go';
+                } else if (diffDays === 0) {
+                    numberEl.textContent = '0';
+                    if (subEl) subEl.textContent = 'days to go';
+                } else {
+                    numberEl.textContent = '—';
+                    if (subEl) subEl.textContent = 'event passed';
+                }
+            }
+        } catch (e) {
+            console.warn('Countdown banner failed:', e);
+        }
     } catch (error) {
         console.error('Error initializing Supabase JobTracker:', error);
     }
 });
+
+// Simple Tasks (in-memory, no persistence)
+function initTasksUI() {
+    const list = document.getElementById('tasks-list');
+    const input = document.getElementById('new-task-input');
+    const addBtn = document.getElementById('add-task-btn');
+    const clearCompletedBtn = document.getElementById('clear-completed-btn');
+    const clearAllBtn = document.getElementById('clear-all-btn');
+    const clearStorageBtn = document.getElementById('clear-storage-btn');
+    if (!list || !input || !addBtn) return;
+
+    const STORAGE_KEY = 'dashboard_tasks_v1';
+
+    const readTasks = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+    };
+
+    const writeTasks = (tasks) => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch {}
+    };
+
+    const collectTasksFromDOM = () => {
+        const items = [];
+        list.querySelectorAll('li').forEach(li => {
+            items.push({
+                text: li.querySelector('.task-text')?.textContent || '',
+                done: li.classList.contains('completed')
+            });
+        });
+        return items;
+    };
+
+    const renderTasks = (tasks) => {
+        list.innerHTML = '';
+        tasks.forEach(t => addTaskToDOM(t.text, t.done, false));
+    };
+
+    const saveFromDOM = () => writeTasks(collectTasksFromDOM());
+
+    const addTaskToDOM = (text, done = false, persist = true) => {
+        const li = document.createElement('li');
+        li.classList.toggle('completed', !!done);
+        li.innerHTML = `
+            <input type="checkbox" class="task-check" ${done ? 'checked' : ''} />
+            <span class="task-text"></span>
+            <span class="task-meta"></span>
+            <button class="task-delete" title="Delete"><i class="fas fa-trash"></i></button>
+        `;
+        li.querySelector('.task-text').textContent = text;
+        const meta = li.querySelector('.task-meta');
+        if (meta) meta.textContent = '';
+        li.querySelector('.task-check').addEventListener('change', (e) => {
+            li.classList.toggle('completed', e.target.checked);
+            saveFromDOM();
+        });
+        li.querySelector('.task-delete').addEventListener('click', () => {
+            li.remove();
+            saveFromDOM();
+        });
+        list.appendChild(li);
+        if (persist) saveFromDOM();
+    };
+
+    const addTask = () => {
+        const text = (input.value || '').trim();
+        if (!text) return;
+        addTaskToDOM(text, false, true);
+        input.value = '';
+        input.focus();
+    };
+
+    addBtn.addEventListener('click', addTask);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            addTask();
+        }
+    });
+
+    clearCompletedBtn?.addEventListener('click', () => {
+        list.querySelectorAll('li.completed').forEach(li => li.remove());
+        saveFromDOM();
+    });
+    clearAllBtn?.addEventListener('click', () => {
+        list.innerHTML = '';
+        saveFromDOM();
+    });
+    clearStorageBtn?.addEventListener('click', () => {
+        localStorage.removeItem(STORAGE_KEY);
+        // Leave DOM as-is; next reload will be empty. If you prefer, also clear DOM:
+        // list.innerHTML = '';
+    });
+
+    // Initial render from localStorage
+    renderTasks(readTasks());
+}
 
 // Setup event listeners to replace inline onclick handlers
 function setupEventListeners() {
@@ -4221,6 +4346,20 @@ function setupEventListeners() {
     if (insightsToggleBtn) {
         insightsToggleBtn.addEventListener('click', toggleInsights);
         console.log('✅ Insights toggle button event listener attached');
+    }
+
+    // Tasks toggle button
+    const tasksToggleBtn = document.getElementById('tasks-toggle-btn');
+    if (tasksToggleBtn) {
+        tasksToggleBtn.addEventListener('click', () => {
+            const section = document.getElementById('tasks-section');
+            if (!section) return;
+            const isHidden = section.style.display === 'none' || section.style.display === '';
+            section.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                document.getElementById('new-task-input')?.focus();
+            }
+        });
     }
     
     // Action buttons
@@ -4383,6 +4522,9 @@ function setupEventListeners() {
     if (window.pomodoroTimer) {
         window.pomodoroTimer.init();
     }
+
+    // Initialize Tasks UI (in-memory)
+    initTasksUI();
 }
 
 // Pomodoro Timer Class

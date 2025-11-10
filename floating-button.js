@@ -193,6 +193,32 @@
     }
   `;
 
+  let sharedScraperLoaded = false;
+  let sharedScraperLoading = null;
+
+  async function ensureSharedScraper() {
+    if (sharedScraperLoaded && typeof window.__scrapeJob === 'function') return;
+    if (sharedScraperLoading) {
+      await sharedScraperLoading;
+      return;
+    }
+    sharedScraperLoading = (async () => {
+      try {
+        const res = await fetch(chrome.runtime.getURL('scrape.js'));
+        const code = await res.text();
+        // Execute the shared scraper in this context so __scrapeJob matches Redo flow
+        (0, eval)(code);
+        sharedScraperLoaded = true;
+        console.log('✅ Shared scraper (scrape.js) loaded in floating button context');
+      } catch (e) {
+        console.warn('⚠️ Failed to load shared scraper:', e);
+      } finally {
+        sharedScraperLoading = null;
+      }
+    })();
+    await sharedScraperLoading;
+  }
+
   // Add styles to page
   const styleSheet = document.createElement('style');
   styleSheet.textContent = styles;
@@ -251,15 +277,39 @@
       // Wait for iframe to load, then notify scraping started
       iframe.onload = async () => {
         console.log('📤 Notifying popup that scraping started...');
-        iframe.contentWindow.postMessage({
-          type: 'SCRAPING_STARTED'
-        }, chrome.runtime.getURL(''));
+        try {
+          iframe.contentWindow.postMessage({ type: 'SCRAPING_STARTED' }, chrome.runtime.getURL(''));
+        } catch {}
         
-        // Scrape data from current page
-        console.log('🔍 Scraping job data from page...');
+        // Scrape data from current page with brief retries until complete
+        console.log('🔍 Scraping job data from page with retries...');
         console.log('Current URL:', window.location.href);
-        
-        scrapedData = await scrapeCurrentPage();
+
+        const isComplete = (d) => {
+          if (!d) return false;
+          const titleOk = !!(d.title && d.title.trim());
+          const companyOk = !!(d.company && d.company.trim());
+          const locationOk = !!(d.location && d.location.trim());
+          const descOk = !!(d.description && d.description.trim());
+          return titleOk && companyOk && locationOk && descOk;
+        };
+
+        const maxTries = 10; // ~2s total with 200ms delay
+        const delay = (ms) => new Promise(r => setTimeout(r, ms));
+        let attempt = 0;
+        let last = null;
+        while (attempt < maxTries) {
+          attempt++;
+          try {
+            last = await scrapeCurrentPage();
+            console.log(`🔎 Attempt ${attempt}/${maxTries} complete=`, isComplete(last));
+            if (isComplete(last)) break;
+          } catch (e) {
+            console.warn('Scrape attempt failed:', e);
+          }
+          await delay(200);
+        }
+        scrapedData = last || {};
         
         console.log('✅ Scraped data:', scrapedData);
         console.log('Data keys:', Object.keys(scrapedData));
@@ -271,10 +321,9 @@
         
         // Send scraped data to popup
         console.log('📤 Sending scraped data to popup iframe...');
-        iframe.contentWindow.postMessage({
-          type: 'SCRAPED_DATA',
-          data: scrapedData
-        }, chrome.runtime.getURL(''));
+        try {
+          iframe.contentWindow.postMessage({ type: 'SCRAPED_DATA', data: scrapedData }, chrome.runtime.getURL(''));
+        } catch {}
         console.log('✅ Data sent to popup');
       };
     } else {
@@ -314,6 +363,28 @@
         description: '',
         jobId: ''
       };
+
+      // Prefer shared scraper (same as Redo) for consistency
+      await ensureSharedScraper();
+      if (typeof window.__scrapeJob === 'function') {
+        try {
+          const sharedResult = window.__scrapeJob();
+          if (sharedResult && (sharedResult.title || sharedResult.company || sharedResult.location || sharedResult.description)) {
+            console.log('🔁 Shared scraper result:', sharedResult);
+            return {
+              ...jobData,
+              ...sharedResult,
+              jobId: sharedResult.job_id || sharedResult.jobId || jobData.jobId,
+              description: sharedResult.description || jobData.description,
+              company: sharedResult.company || jobData.company,
+              title: sharedResult.title || jobData.title,
+              location: sharedResult.location || jobData.location
+            };
+          }
+        } catch (e) {
+          console.warn('⚠️ Shared scraper execution failed:', e);
+        }
+      }
 
       // Try JSON-LD first (works for many job boards)
       const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
@@ -360,6 +431,55 @@
         }
       }
 
+      const scrapeTikTokFromPage = () => {
+        const container = document.querySelector('.jobDetail.positionDetail__1AqfZ, .jobDetail__1UFk5, .jobDetail');
+        if (!container) return null;
+        const titleEl = container.querySelector('[data-test="jobTitle"], h1, h2');
+        const jobTitle = clean(txt(titleEl));
+        let locationText = '';
+        const locEl = container.querySelector('.job-info .content__3ZUKJ.clamp-content, .job-info [class*="content"], [data-test="job-location"]');
+        if (locEl) locationText = clean(txt(locEl));
+        let jobIdText = '';
+        container.querySelectorAll('.job-info span, .job-info div').forEach(span => {
+          const t = (span.textContent || '').trim();
+          const match = t.match(/Job ID:\s*(\S+)/i);
+          if (match && !jobIdText) jobIdText = match[1];
+        });
+        if (!jobIdText) {
+          try {
+            const u = new URL(pageUrl);
+            const parts = u.pathname.split('/').filter(Boolean);
+            if (parts.length >= 3) jobIdText = parts[2];
+          } catch {}
+        }
+        const descParts = [];
+        container.querySelectorAll('.block-title, .block-content, .description-block, .section-content').forEach(el => {
+          const text = clean(txt(el));
+          if (text) descParts.push(text);
+        });
+        const jobDescription = descParts.join('\n\n') || clean(txt(container));
+        return {
+          company: 'TikTok',
+          title: jobTitle,
+          location: locationText,
+          jobId: jobIdText,
+          description: jobDescription.slice(0, 3000)
+        };
+      };
+
+      const isTikTokHost = (() => {
+        try { return new URL(pageUrl).hostname.includes('lifeattiktok.com'); }
+        catch { return pageUrl.includes('lifeattiktok.com'); }
+      })();
+
+      if (isTikTokHost) {
+        const tikTokData = scrapeTikTokFromPage();
+        if (tikTokData) {
+          Object.assign(jobData, tikTokData);
+          // Early return since we have site-specific data
+          return jobData;
+        }
+      }
       // LinkedIn
       if (pageUrl.includes('linkedin.com/jobs')) {
         jobData.title = txt(first('.job-details-jobs-unified-top-card__job-title', '.jobs-unified-top-card__job-title', 'h1.t-24', 'h1'));
@@ -682,4 +802,3 @@
 
   console.log('✅ Job Tracker floating button loaded');
 })();
-

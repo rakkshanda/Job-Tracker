@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-  <head>
+<head>
     <meta charset="utf-8" />
     <title>Save Job</title>
     <style>
@@ -152,6 +152,12 @@ button#save:active { transform: scale(.98); }
     </style>
   </head>
   <body>
+    <div id="loadingMask" style="display:none; position:fixed; inset:0; background:rgba(255,255,255,0.85); z-index:9999; align-items:center; justify-content:center; font-size:14px; color:#444;">
+      <div>
+        <div class="spinner" style="margin:0 auto 8px auto"></div>
+        Loading job info…
+      </div>
+    </div>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
       <h3 style="margin: 0;">Save job for later</h3>
       <div style="display: flex; gap: 5px; align-items: center;">
@@ -202,13 +208,9 @@ button#save:active { transform: scale(.98); }
     <textarea id="description"></textarea>
     <div class="row-actions">
       <span class="hint" id="descCount">0 chars</span>
-      <span class="link" id="enhanceWithAI" style="margin-left: auto;">🤖 Enhance with AI</span>
     </div>
     <div id="progress"></div>
-    <div id="status"></div>
-    <div id="ai-status" style="font-size: 11px; color: #666; margin-top: 4px; display: none;">
-      🤖 Enhanced with AI
-    </div>
+    <div id="statusMessage"></div>
     <div class="hint" id="validationHint" style="display:none">
       ⛔ Please add at least a job title and a link.
     </div>

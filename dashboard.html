@@ -32,6 +32,10 @@
                 <span>Pomodoro</span>
             </button>
             -->
+            <button class="tasks-toggle-btn" id="tasks-toggle-btn" title="Show Tasks">
+                <i class="fas fa-list-check"></i>
+                <span>Tasks</span>
+            </button>
             <button class="insights-toggle-btn" id="insights-toggle-btn" title="Show Insights">
                 <i class="fas fa-chart-bar"></i>
                 <span>Insights</span>
@@ -56,6 +60,23 @@
                     <i class="fas fa-trash-alt"></i>
                     Delete Selected (<span id="selected-count">0</span>)
                 </button>
+            </div>
+        </div>
+
+        <!-- Tasks Section -->
+        <div class="tasks-section" id="tasks-section" style="display: none;">
+            <h2 class="tasks-title">Tasks</h2>
+            <div class="tasks-container">
+                <div class="task-input-row">
+                    <input type="text" id="new-task-input" placeholder="Add a task and press Enter" />
+                    <button id="add-task-btn" class="btn-primary"><i class="fas fa-plus"></i> Add</button>
+                </div>
+                <ul id="tasks-list" class="tasks-list"></ul>
+                <div class="task-actions">
+                    <button id="clear-completed-btn" class="btn-secondary">Clear Completed</button>
+                    <button id="clear-all-btn" class="btn-secondary">Clear All</button>
+                    <button id="clear-storage-btn" class="btn-secondary" title="Remove saved tasks from this browser">Clear Local</button>
+                </div>
             </div>
         </div>
 
@@ -363,6 +384,16 @@
 
         <!-- Stats Cards -->
         <div class="stats-section">
+            <!-- Countdown card placed alongside stats -->
+            <div class="stat-card" id="countdown-card">
+                <div class="stat-icon">
+                    <i class="fas fa-hourglass-half"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="countdown-text">…</div>
+                    <div class="stat-label" id="countdown-subtext" style="font-size: 0.8rem; opacity: 0.8;">days to go</div>
+                </div>
+            </div>
             <div class="stat-card">
                 <div class="stat-icon">
                     <i class="fas fa-briefcase"></i>
