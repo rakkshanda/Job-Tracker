@@ -93,10 +93,55 @@ body {
 .tasks-list { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; }
 .tasks-list li { display: flex; align-items: center; gap: 0.5rem; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; }
 .tasks-list li.completed { opacity: 0.7; text-decoration: line-through; }
+.tasks-list li.dragging { opacity: 0.5; border-style: dashed; }
+.tasks-list li.editing { background: var(--bg-secondary); }
 .task-actions { display: flex; gap: 0.5rem; }
 .task-delete { background: none; border: none; color: #ef4444; cursor: pointer; padding: 6px; border-radius: 6px; }
 .task-delete:hover { background: #fef2f2; }
 .task-meta { margin-left: auto; font-size: 0.8rem; color: var(--text-muted); }
+
+.tasks-list .task-check {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+    background: var(--bg-secondary);
+}
+
+.tasks-list .task-check::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    transform: scale(0);
+}
+
+.tasks-list .task-check:checked {
+    border-color: #10b981;
+    background: #10b981;
+}
+
+.tasks-list .task-check:checked::after {
+    background: #fff;
+    transform: scale(1);
+}
+
+.task-edit-input {
+    flex: 1;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
 
 .nav-brand {
     display: flex;
@@ -1343,6 +1388,10 @@ body.dark-mode .modal {
     transition: background-color 0.3s ease;
 }
 
+#status-delete-confirm .modal-content.status-confirm-card {
+    max-width: 420px;
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
@@ -1568,6 +1617,22 @@ body.dark-mode .modal {
 .btn-secondary:hover {
     background: var(--hover-bg);
     border-color: var(--text-muted);
+}
+
+.btn-danger {
+    background: #ef4444;
+    color: #fff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
 }
 
 /* File Upload */

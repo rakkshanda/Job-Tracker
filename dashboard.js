@@ -19,6 +19,7 @@ class SupabaseJobTracker {
         
         // Temporary status history (not saved until "Save Job" is clicked)
         this.tempStatusHistory = [];
+        this.pendingStatusDeleteIndex = null;
         
         // Pagination
         this.currentPage = 1;
@@ -38,6 +39,7 @@ class SupabaseJobTracker {
         
         console.log('✅ Supabase client initialized:', this.supabase);
         
+        this.setupStatusDeleteConfirmModal();
         this.init();
     }
 
@@ -139,6 +141,28 @@ class SupabaseJobTracker {
         const labelEl = companyBtn?.querySelector('.filter-value');
         if (labelEl) {
             labelEl.textContent = this.getCompanyFilterLabel();
+        }
+    }
+
+    getStatusFilterLabel() {
+        if (this.currentFilters.status === 'all') {
+            return 'All Status';
+        }
+
+        const selected = Array.isArray(this.currentFilters.status)
+            ? this.currentFilters.status
+            : (this.currentFilters.status ? [this.currentFilters.status] : []);
+
+        if (!selected.length) return 'All Status';
+        if (selected.length === 1) return this.formatStatus(selected[0]);
+        return `${this.formatStatus(selected[0])} +${selected.length - 1}`;
+    }
+
+    updateStatusFilterLabel() {
+        const statusBtn = document.querySelector('[data-filter="status"]');
+        const labelEl = statusBtn?.querySelector('.filter-value');
+        if (labelEl) {
+            labelEl.textContent = this.getStatusFilterLabel();
         }
     }
 
@@ -944,25 +968,37 @@ class SupabaseJobTracker {
             // Handle multi-select action buttons
             if (e.target.classList.contains('filter-action-btn')) {
                 const filterType = e.target.dataset.filter;
-                if (filterType === 'company') {
+                if (filterType === 'company' || filterType === 'status') {
                     const dropdown = e.target.closest('.filter-dropdown');
                     const checkboxes = dropdown?.querySelectorAll('input[type="checkbox"]') || [];
                     if (e.target.classList.contains('apply')) {
                         const selected = Array.from(checkboxes)
                             .filter(cb => cb.checked)
-                            .map(cb => this.normalizeCompanyName(cb.value))
+                            .map(cb => filterType === 'company'
+                                ? this.normalizeCompanyName(cb.value)
+                                : cb.value)
                             .filter(Boolean);
-                        this.currentFilters.company = selected.length ? selected : 'all';
-                        this.updateCompanyFilterLabel();
+                        if (filterType === 'company') {
+                            this.currentFilters.company = selected.length ? selected : 'all';
+                            this.updateCompanyFilterLabel();
+                        } else {
+                            this.currentFilters.status = selected.length ? selected : 'all';
+                            this.updateStatusFilterLabel();
+                        }
                     } else if (e.target.classList.contains('clear')) {
                         Array.from(checkboxes).forEach(cb => { cb.checked = false; });
-                        const searchField = dropdown?.querySelector('.filter-search-input');
-                        if (searchField) searchField.value = '';
-                        dropdown?.querySelectorAll('.filter-checkbox').forEach(option => {
-                            option.style.display = '';
-                        });
-                        this.currentFilters.company = 'all';
-                        this.updateCompanyFilterLabel();
+                        if (filterType === 'company') {
+                            const searchField = dropdown?.querySelector('.filter-search-input');
+                            if (searchField) searchField.value = '';
+                            dropdown?.querySelectorAll('.filter-checkbox').forEach(option => {
+                                option.style.display = '';
+                            });
+                            this.currentFilters.company = 'all';
+                            this.updateCompanyFilterLabel();
+                        } else {
+                            this.currentFilters.status = 'all';
+                            this.updateStatusFilterLabel();
+                        }
                     }
                     this.applyFilters();
                     this.updateClearFiltersButton();
@@ -980,12 +1016,7 @@ class SupabaseJobTracker {
                 if (!filterBtn || !filterType) return;
                 const value = e.target.dataset.value;
                 const text = e.target.textContent;
-                
-                // Update the filter button display
                 const filterValueSpan = filterBtn.querySelector('.filter-value');
-                if (filterValueSpan) {
-                    filterValueSpan.textContent = text;
-                }
 
                 if (filterType === 'company' && value === 'all') {
                     dropdown?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
@@ -998,6 +1029,25 @@ class SupabaseJobTracker {
                     });
                     this.currentFilters.company = 'all';
                     this.updateCompanyFilterLabel();
+                    if (filterValueSpan) {
+                        filterValueSpan.textContent = this.getCompanyFilterLabel();
+                    }
+                } else if (filterType === 'status' && value === 'all') {
+                    dropdown?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                        cb.checked = false;
+                    });
+                    this.currentFilters.status = 'all';
+                    this.updateStatusFilterLabel();
+                    if (filterValueSpan) {
+                        filterValueSpan.textContent = this.getStatusFilterLabel();
+                    }
+                    this.applyFilters();
+                    this.updateClearFiltersButton();
+                    dropdown?.classList.remove('show');
+                    e.stopPropagation();
+                    return;
+                } else if (filterValueSpan) {
+                    filterValueSpan.textContent = text;
                 }
                 
                 // Map 'date' filter to 'dateRange' in currentFilters
@@ -1005,6 +1055,8 @@ class SupabaseJobTracker {
                 this.currentFilters[filterKey] = value;
                 if (filterType === 'company') {
                     this.updateCompanyFilterLabel();
+                } else if (filterType === 'status') {
+                    this.updateStatusFilterLabel();
                 }
                 
                 this.applyFilters();
@@ -2067,6 +2119,7 @@ class SupabaseJobTracker {
             document.getElementById('job-url').value = jobData.url || '';
             document.getElementById('job-description').value = jobData.description || '';
             document.getElementById('job-notes').value = jobData.notes || '';
+            document.getElementById('job-external-id').value = jobData.job_id || jobData.jobId || '';
             document.getElementById('job-status').value = jobData.status || 'applied';
             
             // Show and populate status history
@@ -2187,6 +2240,30 @@ class SupabaseJobTracker {
         this.setupDragAndDrop();
     }
 
+    setupStatusDeleteConfirmModal() {
+        const modal = document.getElementById('status-delete-confirm');
+        if (!modal) return;
+        const cancelBtn = document.getElementById('cancel-status-delete');
+        const closeBtn = document.getElementById('close-status-delete-modal');
+        const confirmBtn = document.getElementById('confirm-status-delete');
+        const hideModal = () => {
+            modal.classList.remove('show');
+            this.pendingStatusDeleteIndex = null;
+        };
+
+        cancelBtn?.addEventListener('click', hideModal);
+        closeBtn?.addEventListener('click', hideModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) hideModal();
+        });
+        confirmBtn?.addEventListener('click', () => {
+            if (this.pendingStatusDeleteIndex !== null) {
+                this.performStatusDelete(this.pendingStatusDeleteIndex);
+            }
+            hideModal();
+        });
+    }
+
     setupDragAndDrop() {
         const items = document.querySelectorAll('.status-history-item[draggable="true"]');
         
@@ -2281,10 +2358,19 @@ class SupabaseJobTracker {
     }
 
     deleteFromTempHistory(index) {
-        if (confirm('Delete this status change?')) {
-            this.tempStatusHistory.splice(index, 1);
-            this.renderStatusHistory();
+        const modal = document.getElementById('status-delete-confirm');
+        if (modal) {
+            this.pendingStatusDeleteIndex = index;
+            modal.classList.add('show');
+        } else {
+            this.performStatusDelete(index);
         }
+    }
+
+    performStatusDelete(index) {
+        if (index === undefined || index === null || Number.isNaN(index)) return;
+        this.tempStatusHistory.splice(index, 1);
+        this.renderStatusHistory();
     }
 
     // Statistics
@@ -2346,7 +2432,7 @@ class SupabaseJobTracker {
 
         activeJobs.forEach(job => {
             const title = (job.title || '').toLowerCase();
-            if (title.includes('product') || title.includes('program')) {
+            if (title.includes('product') || title.includes('program') || title.includes('Technology')) {
                 productCount++;
             } else {
                 sdeCount++;
@@ -2423,14 +2509,9 @@ class SupabaseJobTracker {
         const canvas = document.getElementById('companies-chart');
         if (!canvas) return;
 
-        // Filter to exclude jobs with "Saved" status (include everything else)
-        const activeJobs = this.jobs.filter(job =>
-            (job.status || '').toLowerCase() !== 'saved'
-        );
-
-        // Count jobs by company
+        // Count jobs by company (all statuses)
         const companyCounts = {};
-        activeJobs.forEach(job => {
+        this.jobs.forEach(job => {
             const company = job.company || 'Unknown';
             companyCounts[company] = (companyCounts[company] || 0) + 1;
         });
@@ -3305,6 +3386,40 @@ class SupabaseJobTracker {
             console.warn('⚠️ No locations found in database. All jobs may have empty location fields.');
         }
 
+        // Update status filter (multi-select checkboxes)
+        const statusFilter = document.querySelector('[data-filter="status"] + .filter-dropdown');
+        if (statusFilter) {
+            const selectedStatuses = this.currentFilters.status === 'all'
+                ? []
+                : Array.isArray(this.currentFilters.status)
+                    ? this.currentFilters.status
+                    : (this.currentFilters.status ? [this.currentFilters.status] : []);
+
+            const statusOptionsHtml = this.statusOptions.map(statusValue => {
+                const formatted = this.sanitize(this.formatStatus(statusValue));
+                const isChecked = selectedStatuses.includes(statusValue);
+                return `
+                    <label class="filter-checkbox">
+                        <input type="checkbox" value="${statusValue}" ${isChecked ? 'checked' : ''}>
+                        <span>${formatted}</span>
+                    </label>
+                `;
+            }).join('');
+
+            statusFilter.innerHTML = `
+                <div class="filter-option" data-value="all">All Status</div>
+                <div class="filter-options-scroll">
+                    ${statusOptionsHtml}
+                </div>
+                <div class="filter-actions">
+                    <button type="button" class="filter-action-btn apply" data-filter="status">Apply</button>
+                    <button type="button" class="filter-action-btn clear" data-filter="status">Clear</button>
+                </div>
+            `;
+            statusFilter.classList.remove('show');
+        }
+        this.updateStatusFilterLabel();
+
         // Update company filter
         const companyFilter = document.querySelector('[data-filter="company"] + .filter-dropdown');
         if (companyFilter) {
@@ -4112,6 +4227,7 @@ async function saveJob() {
         url: document.getElementById('job-url').value,
         description: document.getElementById('job-description').value,
         notes: document.getElementById('job-notes')?.value || '',
+        jobId: document.getElementById('job-external-id')?.value || '',
         status: document.getElementById('job-status').value
     };
 
@@ -4126,10 +4242,10 @@ async function saveJob() {
         console.log('Updating existing job with ID:', jobTracker.editingJobId);
 
         // Convert temp history to proper format (remove isOriginal, reverse for chronological order)
-        const statusHistory = jobTracker.tempStatusHistory
-            .filter(entry => !entry.isOriginal) // Remove original entry
-            .reverse() // Convert from newest-first to oldest-first
-            .map(entry => ({
+            const statusHistory = jobTracker.tempStatusHistory
+                .filter(entry => !entry.isOriginal) // Remove original entry
+                .reverse() // Convert from newest-first to oldest-first
+                .map(entry => ({
                 status: entry.status,
                 timestamp: entry.timestamp,
                 date: entry.date
@@ -4140,8 +4256,10 @@ async function saveJob() {
             ...formData,
             company: jobTracker.normalizeCompanyName(formData.company),
             location: jobTracker.normalizeLocation(formData.location),
+            job_id: formData.jobId,
             status_history: statusHistory
         };
+        delete updateData.jobId;
 
         console.log('=== UPDATE DEBUG ===');
         console.log('Original form location:', formData.location);
@@ -4196,7 +4314,7 @@ async function saveJob() {
                 title: formData.title || '',
                 company: jobTracker.normalizeCompanyName(formData.company || ''),
                 location: formData.location || '',
-                job_id: '',
+                job_id: formData.jobId || '',
                 status: formData.status || 'saved',
                 applied_date: jobTracker.getTodayDate(),
                 url: formData.url || '',
@@ -4427,16 +4545,103 @@ function initTasksUI() {
         return items;
     };
 
+    let draggingTask = null;
+
     const renderTasks = (tasks) => {
         list.innerHTML = '';
-        tasks.forEach(t => addTaskToDOM(t.text, t.done, false));
+        tasks.forEach(t => addTaskToDOM(t.text, t.done, false, false));
     };
 
     const saveFromDOM = () => writeTasks(collectTasksFromDOM());
 
-    const addTaskToDOM = (text, done = false, persist = true) => {
+    const setupDragHandlers = (li) => {
+        li.addEventListener('dragstart', (e) => {
+            draggingTask = li;
+            li.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', '');
+        });
+        li.addEventListener('dragend', () => {
+            if (draggingTask === li) draggingTask = null;
+            li.classList.remove('dragging');
+            saveFromDOM();
+        });
+    };
+
+    const getDragAfterElement = (y) => {
+        const draggableElements = [...list.querySelectorAll('li:not(.dragging)')];
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset, element: child };
+            }
+            return closest;
+        }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+    };
+
+    list.addEventListener('dragover', (e) => {
+        if (!draggingTask) return;
+        e.preventDefault();
+        const afterElement = getDragAfterElement(e.clientY);
+        if (!afterElement) {
+            list.appendChild(draggingTask);
+        } else if (afterElement !== draggingTask) {
+            list.insertBefore(draggingTask, afterElement);
+        }
+    });
+    list.addEventListener('drop', (e) => {
+        if (draggingTask) e.preventDefault();
+    });
+
+    const enableInlineEditing = (li) => {
+        const startEdit = () => {
+            if (li.classList.contains('editing')) return;
+            const textSpan = li.querySelector('.task-text');
+            if (!textSpan) return;
+            const current = textSpan.textContent || '';
+            const inputEdit = document.createElement('input');
+            inputEdit.type = 'text';
+            inputEdit.value = current;
+            inputEdit.className = 'task-edit-input';
+            li.classList.add('editing');
+            textSpan.replaceWith(inputEdit);
+            inputEdit.focus();
+            inputEdit.select();
+
+            const finish = (commit) => {
+                const value = commit ? (inputEdit.value || '').trim() : current;
+                const newSpan = document.createElement('span');
+                newSpan.className = 'task-text';
+                newSpan.textContent = value || current;
+                inputEdit.replaceWith(newSpan);
+                li.classList.remove('editing');
+                enableInlineEditing(li); // reattach handler
+                saveFromDOM();
+            };
+
+            inputEdit.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    finish(true);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    finish(false);
+                }
+            });
+            inputEdit.addEventListener('blur', () => finish(true));
+        };
+
+        const textSpan = li.querySelector('.task-text');
+        if (textSpan) {
+            textSpan.addEventListener('dblclick', startEdit);
+        }
+    };
+
+    const addTaskToDOM = (text, done = false, persist = true, insertAtTop = false) => {
         const li = document.createElement('li');
         li.classList.toggle('completed', !!done);
+        li.draggable = true;
         li.innerHTML = `
             <input type="checkbox" class="task-check" ${done ? 'checked' : ''} />
             <span class="task-text"></span>
@@ -4454,14 +4659,20 @@ function initTasksUI() {
             li.remove();
             saveFromDOM();
         });
-        list.appendChild(li);
+        setupDragHandlers(li);
+        enableInlineEditing(li);
+        if (insertAtTop && list.firstChild) {
+            list.insertBefore(li, list.firstChild);
+        } else {
+            list.appendChild(li);
+        }
         if (persist) saveFromDOM();
     };
 
     const addTask = () => {
         const text = (input.value || '').trim();
         if (!text) return;
-        addTaskToDOM(text, false, true);
+        addTaskToDOM(text, false, true, true);
         input.value = '';
         input.focus();
     };
@@ -4601,7 +4812,7 @@ function setupEventListeners() {
                     dateRange: 'all'
                 };
 
-                jobTracker.updateCompanyFilterLabel();
+                jobTracker.populateFilterOptions();
                 
                 // Clear search input
                 const searchInput = document.getElementById('search-input');
@@ -4620,10 +4831,14 @@ function setupEventListeners() {
                                 filterValueSpan.textContent = 'All Time';
                                 break;
                             case 'status':
-                                filterValueSpan.textContent = 'Status';
+                                filterValueSpan.textContent = jobTracker
+                                    ? jobTracker.getStatusFilterLabel()
+                                    : 'Status';
                                 break;
                             case 'company':
-                                filterValueSpan.textContent = 'All Companies';
+                                filterValueSpan.textContent = jobTracker
+                                    ? jobTracker.getCompanyFilterLabel()
+                                    : 'All Companies';
                                 break;
                             case 'location':
                                 filterValueSpan.textContent = 'All Locations';
@@ -4634,18 +4849,6 @@ function setupEventListeners() {
                         }
                     }
                 });
-
-                const companyDropdown = document.querySelector('[data-filter="company"] + .filter-dropdown');
-                if (companyDropdown) {
-                    companyDropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                        cb.checked = false;
-                    });
-                    const searchField = companyDropdown.querySelector('.filter-search-input');
-                    if (searchField) searchField.value = '';
-                    companyDropdown.querySelectorAll('.filter-checkbox').forEach(option => {
-                        option.style.display = '';
-                    });
-                }
                 
                 // Apply filters (shows all jobs)
                 jobTracker.applyFilters();

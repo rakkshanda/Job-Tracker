@@ -467,16 +467,8 @@
                                 <i class="fas fa-filter"></i>
                                 <span class="filter-value">Status</span>
                             </button>
-                            <div class="filter-dropdown">
-                                <div class="filter-option" data-value="all">All Status</div>
-                                <div class="filter-option" data-value="saved">Saved</div>
-                                <div class="filter-option" data-value="applied">Applied</div>
-                                <div class="filter-option" data-value="resume_screening">Resume Screening</div>
-                                <div class="filter-option" data-value="interview">Interview</div>
-                                <div class="filter-option" data-value="offer">Offer</div>
-                                <div class="filter-option" data-value="rejected">Rejected</div>
-                                <div class="filter-option" data-value="withdrawn">Withdrawn</div>
-                                <div class="filter-option" data-value="ended">Ended</div>
+                            <div class="filter-dropdown status-dropdown" data-multiselect="status">
+                                <!-- Populated dynamically -->
                             </div>
                         </div>
                         <div class="filter-group">
@@ -643,6 +635,10 @@
                     <textarea id="job-notes" rows="3" placeholder="Add any additional notes about this job..."></textarea>
                 </div>
                 <div class="form-group">
+                    <label for="job-external-id">Job ID</label>
+                    <input type="text" id="job-external-id" placeholder="e.g., R12345" />
+                </div>
+                <div class="form-group">
                     <label for="job-status">Status</label>
                     <select id="job-status">
                         <option value="saved">Saved</option>
@@ -691,6 +687,25 @@
                     <button type="submit" class="btn-primary">Save Job</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Confirm delete status change modal -->
+    <div class="modal" id="status-delete-confirm">
+        <div class="modal-content status-confirm-card">
+            <div class="modal-header">
+                <h2>Delete Status Update?</h2>
+                <button class="close-btn" id="close-status-delete-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin: 0; color: var(--text-secondary);">
+                    This status change will be removed from the history for this job. This action cannot be undone.
+                </p>
+            </div>
+            <div class="modal-actions" style="justify-content: flex-end; gap: 0.75rem;">
+                <button type="button" class="btn-secondary" id="cancel-status-delete">Cancel</button>
+                <button type="button" class="btn-danger" id="confirm-status-delete">Delete</button>
+            </div>
         </div>
     </div>
 
