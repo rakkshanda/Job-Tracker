@@ -209,7 +209,6 @@
                !lower.includes('onsite') &&
                !lower.includes('salary') &&
                !lower.includes('benefits');
-               
       });
     
     return allText[0] || "";
