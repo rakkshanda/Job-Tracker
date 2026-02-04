@@ -278,8 +278,10 @@
       iframe.onload = async () => {
         console.log('📤 Notifying popup that scraping started...');
         try {
-          iframe.contentWindow.postMessage({ type: 'SCRAPING_STARTED' }, chrome.runtime.getURL(''));
-        } catch {}
+          iframe.contentWindow.postMessage({ type: 'SCRAPING_STARTED' }, '*');
+        } catch (e) {
+          console.error('Failed to send SCRAPING_STARTED:', e);
+        }
         
         // Scrape data from current page with brief retries until complete
         console.log('🔍 Scraping job data from page with retries...');
@@ -322,8 +324,10 @@
         // Send scraped data to popup
         console.log('📤 Sending scraped data to popup iframe...');
         try {
-          iframe.contentWindow.postMessage({ type: 'SCRAPED_DATA', data: scrapedData }, chrome.runtime.getURL(''));
-        } catch {}
+          iframe.contentWindow.postMessage({ type: 'SCRAPED_DATA', data: scrapedData }, '*');
+        } catch (e) {
+          console.error('Failed to send data to popup:', e);
+        }
         console.log('✅ Data sent to popup');
       };
     } else {

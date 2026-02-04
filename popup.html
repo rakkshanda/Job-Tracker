@@ -16,7 +16,17 @@
       button { padding: 8px 12px; border: 0; border-radius: 8px; cursor: pointer; }
       .header-btn { background: #111; color: #fff; font-size: 12px; transition: all 0.2s ease; }
       .header-btn:hover { background: #333; }
-      #status { margin-top: 8px; font-size: 12px; min-height: 16px; }
+      #status { display: none; }
+      .status-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+      .status-tab { flex: 1 1 calc(50% - 6px); min-width: 120px; padding: 6px 10px; border-radius: 8px; border: 1px solid #e5e7eb; background: #f5f5f5; font-size: 12px; color: #111; text-transform: capitalize; transition: all 0.15s ease; }
+      .status-tab:hover { background: #e9ecef; border-color: #d6d6d6; }
+      .status-tab.active { background: #111; color: #fff; border-color: #111; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+      .status-tabs.disabled .status-tab { opacity: 0.6; pointer-events: none; }
+      .location-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+      .location-tab { flex: 1 1 calc(50% - 6px); min-width: 120px; padding: 6px 10px; border-radius: 8px; border: 1px solid #e5e7eb; background: #f5f5f5; font-size: 12px; color: #111; transition: all 0.15s ease; }
+      .location-tab:hover { background: #e9ecef; border-color: #d6d6d6; }
+      .location-tab.active { background: #111; color: #fff; border-color: #111; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+      .location-tabs.disabled .location-tab { opacity: 0.6; pointer-events: none; }
       .missing { border-color: #f33; }
       #close { background: none !important; color: #999 !important; }
       #close:hover { color: #666 !important; background: #f5f5f5 !important; border-radius: 50%; }
@@ -159,7 +169,7 @@ button#save:active { transform: scale(.98); }
       </div>
     </div>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <h3 style="margin: 0;">Save job for later</h3>
+      <h3 style="margin: 0;">Save job for later..</h3>
       <div style="display: flex; gap: 5px; align-items: center;">
         <button type="button" id="save" class="header-btn" title="Save job">Save Job</button>
         <button type="button" id="clearTop" class="header-btn" title="Clear all fields">Clear</button>
@@ -176,15 +186,32 @@ button#save:active { transform: scale(.98); }
     <input id="title" />
 
     <label>Location</label>
+    <div class="location-tabs" id="locationTabs">
+      <button type="button" class="location-tab" data-value="NYC" aria-pressed="false">NYC</button>
+      <button type="button" class="location-tab" data-value="SF" aria-pressed="false">SF</button>
+      <button type="button" class="location-tab" data-value="Remote" aria-pressed="false">Remote</button>
+      <button type="button" class="location-tab" data-value="Seattle" aria-pressed="false">Seattle</button>
+    </div>
     <input id="location" />
 
     <label>Job ID (optional)</label>
     <input id="jobId" />
 
     <label>Status</label>
-    <select id="status">
+    <div class="status-tabs" id="statusTabs">
+      <button type="button" class="status-tab" data-value="saved" aria-pressed="false">Saved</button>
+      <button type="button" class="status-tab" data-value="applied" aria-pressed="true">Applied</button>
+      <button type="button" class="status-tab" data-value="resume_screening">Resume Screening</button>
+      <button type="button" class="status-tab" data-value="interview">Interview</button>
+      <button type="button" class="status-tab" data-value="offer">Offer</button>
+      <button type="button" class="status-tab" data-value="rejected">Rejected</button>
+      <button type="button" class="status-tab" data-value="withdrawn">Withdrawn</button>
+      <button type="button" class="status-tab" data-value="ended">Ended</button>
+    </div>
+    <!-- Hidden select remains for data model/backward compat; kept in sync via JS -->
+    <select id="status" aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;">
       <option value="saved">Saved</option>
-      <option value="applied">Applied</option>
+      <option value="applied" selected>Applied</option>
       <option value="resume_screening">Resume Screening</option>
       <option value="interview">Interview</option>
       <option value="offer">Offer</option>

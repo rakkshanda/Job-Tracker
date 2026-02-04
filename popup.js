@@ -1,4 +1,6 @@
 const $ = (id) => document.getElementById(id);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const DEFAULT_STATUS = 'applied';
 // Buffer incoming messages until DOM + listeners are ready
 let popupReady = false;
 const pendingMessages = [];
@@ -15,6 +17,8 @@ function startLoading() {
         if (el.placeholder !== undefined) el.placeholder = 'Loading…';
       }
     });
+    disableLocationTabs();
+    disableStatusTabs();
   } catch {}
 }
 
@@ -25,6 +29,8 @@ function stopLoading() {
       const el = $(id);
       if (el) el.classList.remove('skeleton-loading');
     });
+    enableLocationTabs();
+    enableStatusTabs();
   } catch {}
 }
 
@@ -37,7 +43,7 @@ function saveDraft() {
     title: $('title').value,
     location: $('location').value,
     jobId: $('jobId').value,
-    status: $('status').value,
+    status: getStatusValue(),
     source: $('source').value,
     url: $('url').value,
     description: $('description').value,
@@ -58,7 +64,7 @@ async function restoreDraft() {
       $('title').value = data.title || $('title').value;
       $('location').value = data.location || $('location').value;
       $('jobId').value = data.jobId || $('jobId').value;
-      $('status').value = data.status || $('status').value;
+      setStatusValue(data.status || $('status').value);
       $('source').value = data.source || $('source').value;
       $('url').value = data.url || $('url').value;
       $('description').value = data.description || $('description').value;
@@ -81,6 +87,59 @@ function cleanWhitespace(s = "") {
 function sanitizeCommas(s = "", allowCommas = false) {
   if (allowCommas) return s; // Don't remove commas from description
   return s.replace(/,/g, "").trim(); // Remove all commas from other fields
+}
+
+function setLocationTabActive(val = '') {
+  const tabs = $$('#locationTabs .location-tab');
+  tabs.forEach(btn => {
+    const isActive = val && btn.dataset.value.toLowerCase() === val.toLowerCase();
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+  });
+}
+
+function disableLocationTabs() {
+  const wrap = $('locationTabs');
+  if (wrap) wrap.classList.add('disabled');
+  $$('#locationTabs .location-tab').forEach(btn => btn.disabled = true);
+}
+
+function enableLocationTabs() {
+  const wrap = $('locationTabs');
+  if (wrap) wrap.classList.remove('disabled');
+  $$('#locationTabs .location-tab').forEach(btn => btn.disabled = false);
+}
+
+function setStatusValue(val = DEFAULT_STATUS) {
+  const select = $('status');
+  if (select) select.value = val || DEFAULT_STATUS;
+  const tabs = $$('#statusTabs .status-tab');
+  tabs.forEach(btn => {
+    const isActive = btn.dataset.value === (val || DEFAULT_STATUS);
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+  });
+}
+
+function getStatusValue() {
+  const active = document.querySelector('#statusTabs .status-tab.active');
+  if (active) return active.dataset.value;
+  const select = $('status');
+  return select ? select.value : DEFAULT_STATUS;
+}
+
+function disableStatusTabs() {
+  const wrap = $('statusTabs');
+  if (wrap) wrap.classList.add('disabled');
+  $$('#statusTabs .status-tab').forEach(btn => btn.disabled = true);
+  if ($('status')) $('status').disabled = true;
+}
+
+function enableStatusTabs() {
+  const wrap = $('statusTabs');
+  if (wrap) wrap.classList.remove('disabled');
+  $$('#statusTabs .status-tab').forEach(btn => btn.disabled = false);
+  if ($('status')) $('status').disabled = false;
 }
 
 async function getTab() {
@@ -156,7 +215,7 @@ function handleParentMessage(event) {
     if (loadingTimer) clearTimeout(loadingTimer);
     loadingTimer = setTimeout(() => {
       stopLoading();
-      const st = document.getElementById('status');
+      const st = document.getElementById('statusMessage');
       if (st) st.textContent = "Couldn't auto-fill. Try Redo.";
     }, LOADING_TIMEOUT_MS);
   } else if (msg.type === 'SCRAPED_DATA' && msg.data) {
@@ -382,7 +441,7 @@ async function saveRow(payload) {
   // Prepare Supabase payload
   // Initialize status history with the first status
   const initialStatusHistory = [{
-    status: payload.status || 'saved',
+    status: payload.status || DEFAULT_STATUS,
     timestamp: new Date().toISOString(),
     date: new Date().toLocaleDateString('en-US', { 
       year: 'numeric', 
@@ -398,7 +457,7 @@ async function saveRow(payload) {
     company: payload.company || '',
     location: payload.location || '',
     job_id: payload.jobId || '',
-    status: payload.status || 'saved',
+    status: payload.status || DEFAULT_STATUS,
     applied_date: todayDate,
     url: payload.url || '',
     description: payload.description || '',
@@ -492,8 +551,10 @@ function clearFields() {
   $('title').value = '';
   $('location').value = '';
   $('jobId').value = '';
-  $('status').value = 'saved'; // Reset to default
-  $('status').disabled = false;
+  setStatusValue(DEFAULT_STATUS); // Reset to default
+  enableStatusTabs();
+  setLocationTabActive('');
+  enableLocationTabs();
   $('url').value = '';
   $('description').value = '';
   
@@ -516,6 +577,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('📍 Clear button exists?', !!$('clearTop'));
   console.log('📍 Redo button exists?', !!$('redoTop'));
   console.log('📍 Close button exists?', !!$('close'));
+
+  // Location tabs wiring
+  const locationTabButtons = $$('#locationTabs .location-tab');
+  if (locationTabButtons.length) {
+    locationTabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.value || btn.textContent.trim();
+        $('location').value = val;
+        setLocationTabActive(val);
+        saveDraft();
+        markMissing();
+      });
+    });
+  }
+
+  // Status tabs wiring
+  const statusTabButtons = $$('#statusTabs .status-tab');
+  if (statusTabButtons.length) {
+    statusTabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        setStatusValue(btn.dataset.value);
+        saveDraft();
+      });
+    });
+    setStatusValue(DEFAULT_STATUS);
+  }
   
   // Will be populated by postMessage from floating button
   let scrapedData = null;
@@ -523,7 +610,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Skeleton loading helpers
   function showSkeletonLoading() {
     console.log('💀 Showing skeleton loading animation');
-    const fields = ['company', 'title', 'location', 'url', 'description', 'source', 'status'];
+    const fields = ['company', 'title', 'location', 'url', 'description', 'source'];
     fields.forEach(id => {
       const field = $(id);
       if (field) {
@@ -531,11 +618,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         field.disabled = true;
       }
     });
+    disableLocationTabs();
+    disableStatusTabs();
   }
   
   function hideSkeletonLoading() {
     console.log('✅ Hiding skeleton loading animation');
-    const fields = ['company', 'title', 'location', 'url', 'description', 'source', 'status'];
+    const fields = ['company', 'title', 'location', 'url', 'description', 'source'];
     fields.forEach(id => {
       const field = $(id);
       if (field) {
@@ -543,6 +632,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         field.disabled = false;
       }
     });
+    enableLocationTabs();
+    enableStatusTabs();
   }
   
   // Auto-detect source from URL
@@ -562,7 +653,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (event.data && event.data.type === 'SCRAPING_STARTED') {
       console.log('🔄 Scraping started...');
       showSkeletonLoading();
-      if ($('status')) { $('status').disabled = false; $('status').value = 'saved'; }
+      setStatusValue(DEFAULT_STATUS);
+      enableStatusTabs();
       return;
     }
     
@@ -572,10 +664,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       hideSkeletonLoading();
       
-      if ($('status')) {
-        $('status').disabled = false;
-        $('status').value = 'saved';
-      }
+      enableStatusTabs();
+      setStatusValue(DEFAULT_STATUS);
+      setLocationTabActive(scrapedData.location || '');
 
       // 🔐 Ensure TikTok jobId is present if this is a TikTok referral URL
       try {
@@ -610,6 +701,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         $('company').value = sanitizeCommas(scrapedData.company || '');
         $('title').value = sanitizeCommas(scrapedData.title || '');
         $('location').value = sanitizeCommas(scrapedData.location || '');
+        setLocationTabActive(scrapedData.location || '');
         $('jobId').value = sanitizeCommas(scrapedData.job_id || scrapedData.jobId || '');
         $('description').value = scrapedData.description || '';
         $('url').value = scrapedData.url || '';
@@ -631,6 +723,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('url').value = currentUrl;
     $('source').value = detectSource(currentUrl);
   }
+  setStatusValue(DEFAULT_STATUS);
 
   if (isStandalone) {
     document.title = 'Save Job — Sticky Editor';
@@ -754,6 +847,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (originalValue !== sanitizedValue) {
         e.target.value = sanitizedValue;
       }
+      if (id === 'location') {
+        setLocationTabActive(e.target.value);
+      }
       saveDraft();
     });
     $(id).addEventListener('change', saveDraft);
@@ -785,6 +881,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         guessLocationFromText($('description').value || meta.ogTitle || meta.title) ||
         (/auburnwa\.gov|neogov|governmentjobs\.com/i.test(tab.url) ? 'Auburn, WA' : '')
       );
+      setLocationTabActive($('location').value);
       markMissing();
     };
   }
@@ -827,7 +924,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       title: $('title').value.trim(),
       location: $('location').value.trim(),
       jobId: $('jobId').value.trim(),
-      status: $('status').value,
+      status: getStatusValue(),
       source: $('source').value,
       url: $('url').value.trim(),
       description: $('description').value.trim()
@@ -915,6 +1012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           $('company').value = sanitizeCommas(scrapedData.company || '');
           $('title').value = sanitizeCommas(scrapedData.title || '');
           $('location').value = sanitizeCommas(scrapedData.location || '');
+          setLocationTabActive(scrapedData.location || '');
           $('url').value = sanitizeCommas(scrapedData.url || tab.url || '');
           $('description').value = cleanWhitespace(scrapedData.description || '');
           $('jobId').value = sanitizeCommas(scrapedData.job_id || scrapedData.jobId || '');

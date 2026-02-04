@@ -1192,6 +1192,7 @@ body.dark-mode .jobs-table tr.selected {
 
 .jobs-table td.title-cell {
     width: 24%;
+
 }
 
 .job-title {
@@ -1220,6 +1221,42 @@ body.dark-mode .jobs-table tr.selected {
     color: var(--text-muted);
     cursor: default;
     text-decoration: none;
+    pointer-events: none;
+}
+
+.col-favorite {
+    width: 40px;
+    text-align: center;
+}
+
+.favorite-cell {
+    text-align: center;
+}
+
+.favorite-toggle {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: color 0.2s ease, background 0.2s ease;
+}
+
+.favorite-toggle:hover {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.15);
+}
+
+.favorite-toggle.active {
+    color: #fbbf24;
+}
+
+.favorite-toggle.updating {
+    opacity: 0.6;
     pointer-events: none;
 }
 

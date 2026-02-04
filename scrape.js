@@ -535,133 +535,218 @@
     },
 
     // Handshake
-    "joinhandshake.com": () => ({
-      company: clean(txt(first(
-        "h4:contains('About the employer') + div p.heading",
-        "h4:contains('About the employer') ~ div p.heading", 
-        ".heading",
-        "p.heading",
-        "div:has(h4:contains('About the employer')) p.heading",
-        "div:has(h4:contains('About the employer')) .heading",
-        "h4:contains('About the employer') + * p.heading",
-        "h4:contains('About the employer') + * .heading",
-        "h1 + div h1",
-        ".company-header h1",
-        ".company-header h2", 
-        ".job-header h1",
-        ".job-header h2",
-        ".employer-header h1",
-        ".employer-header h2",
-        ".company-name",
-        ".employer-name",
-        ".company-title",
-        ".employer-title",
-        "[data-testid='company-name']",
-        "[data-testid='employer-name']",
-        "[data-cy='company-name']",
-        ".job-header .company",
-        ".job-detail-header .company",
-        ".employer-info .name",
-        ".company-info .name",
-        "h2.company-name",
-        ".company-header .name",
-        ".company-logo + *",
-        ".employer-logo + *",
-        ".logo + *",
-        ".header .company",
-        ".page-header .company",
-        ".job-details .company",
-        ".job-info .company"
-      ))) || handshakeCompanyDetection(),
-      title: clean(txt(first(
-        "h1.job-title",
-        ".job-title",
-        "[data-testid='job-title']",
-        "h1",
-        ".job-header h1"
-      ))),
-      location: clean(txt(first(
-        ".job-location",
-        ".location",
-        "[data-testid='location']",
-        ".job-detail-header .location",
-        ".job-header .location"
-      ))),
-      description: clean(txt(first(
-        ".job-description",
-        ".description",
-        "[data-testid='job-description']",
-        ".job-details",
-        ".job-content"
-      ))),
-    }),
+    "joinhandshake.com": () => {
+      const bodyText = () => (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+      const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+      const firstText = (selector) => {
+        const el = document.querySelector(selector);
+        return norm(el?.textContent || "");
+      };
 
-    "app.joinhandshake.com": () => ({
-      company: clean(txt(first(
-        "h4:contains('About the employer') + div p.heading",
-        "h4:contains('About the employer') ~ div p.heading", 
-        ".heading",
-        "p.heading",
-        "div:has(h4:contains('About the employer')) p.heading",
-        "div:has(h4:contains('About the employer')) .heading",
-        "h4:contains('About the employer') + * p.heading",
-        "h4:contains('About the employer') + * .heading",
-        "h1 + div h1",
-        ".company-header h1",
-        ".company-header h2", 
-        ".job-header h1",
-        ".job-header h2",
-        ".employer-header h1",
-        ".employer-header h2",
-        ".company-name",
-        ".employer-name",
-        ".company-title",
-        ".employer-title",
-        "[data-testid='company-name']",
-        "[data-testid='employer-name']",
-        "[data-cy='company-name']",
-        ".job-header .company",
-        ".job-detail-header .company",
-        ".employer-info .name",
-        ".company-info .name",
-        "h2.company-name",
-        ".company-header .name",
-        ".company-logo + *",
-        ".employer-logo + *",
-        ".logo + *",
-        ".header .company",
-        ".page-header .company",
-        ".job-details .company",
-        ".job-info .company"
-      ))) || handshakeCompanyDetection(),
-      title: clean(txt(first(
-        "h1.job-title",
-        ".job-title",
-        "[data-testid='job-title']",
-        "h1",
-        ".job-header h1"
-      ))),
-      location: clean(txt(first(
-        ".job-location",
-        ".location",
-        "[data-testid='location']",
-        ".job-detail-header .location",
-        ".job-header .location"
-      ))),
-      description: clean(txt(first(
-        ".job-description",
-        ".description",
-        "[data-testid='job-description']",
-        ".job-details",
-        ".job-content"
-      ))),
-    }),
+      const findCompany = () => {
+        const links = Array.from(document.querySelectorAll('a[href*="/e/"]'));
+        const best = links
+          .map(a => ({ a, t: norm(a.textContent) }))
+          .filter(x => x.t && x.t.length > 1 && x.t.length < 80)
+          .filter(x => !/education|software|internet|finance|health|fashion/i.test(x.t))
+          .find(Boolean);
+        return best ? best.t : "";
+      };
+
+      const findJobTitle = () => {
+        return (
+          firstText('a[href*="/jobs/"] h1') ||
+          firstText("h1") ||
+          firstText('a[href*="/jobs/"]')
+        );
+      };
+
+      const sliceBetween = (full, startMarker, endMarkers) => {
+        const start = full.indexOf(startMarker);
+        if (start === -1) return "";
+        const after = full.slice(start);
+        let end = after.length;
+        for (const m of endMarkers) {
+          const idx = after.indexOf(m);
+          if (idx !== -1 && idx < end) end = idx;
+        }
+        return after.slice(0, end).trim();
+      };
+
+      const findLocation = () => {
+        const text = bodyText();
+        const glance = sliceBetween(text, "At a glance", [
+          "The Role",
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+
+        if (glance) {
+          let m = glance.match(/based in\s+([A-Za-z .'-]+,\s*[A-Z]{2})/i);
+          if (m) return m[1];
+          if (/\bRemote\b/i.test(glance)) return "Remote";
+          if (/\bHybrid\b/i.test(glance)) return "Hybrid";
+          if (/\bOnsite\b/i.test(glance)) return "Onsite";
+          m = glance.match(/([A-Za-z .'-]+,\s*[A-Z]{2})/);
+          if (m) return m[1];
+        }
+
+        const about = sliceBetween(text, "About the employer", [
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        if (about) {
+          const m = about.match(/([A-Za-z .'-]+,\s*[A-Z]{2})/);
+          if (m) return m[1];
+        }
+
+        const role = sliceBetween(text, "The Role", [
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        if (role) {
+          const m =
+            role.match(/Location\s+([A-Za-z0-9 .,'()/-]+?)(?=\s{1,}What You'll Do|Who You Are|How You Work|What Success Looks Like|About|$)/i) ||
+            role.match(/Location\s+([A-Za-z .'-]+,\s*[A-Z]{2})/i);
+          if (m) return norm(m[1]);
+        }
+        return "";
+      };
+
+      const findJobDescription = () => {
+        const text = bodyText();
+        const jd = sliceBetween(text, "The Role", [
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        return jd ? jd : "";
+      };
+
+      return {
+        company: findCompany(),
+        title: findJobTitle(),
+        location: findLocation(),
+        description: findJobDescription(),
+        url: location.href
+      };
+    },
+
+    "app.joinhandshake.com": () => {
+      const bodyText = () => (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+      const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+      const firstText = (selector) => {
+        const el = document.querySelector(selector);
+        return norm(el?.textContent || "");
+      };
+
+      const findCompany = () => {
+        const links = Array.from(document.querySelectorAll('a[href*="/e/"]'));
+        const best = links
+          .map(a => ({ a, t: norm(a.textContent) }))
+          .filter(x => x.t && x.t.length > 1 && x.t.length < 80)
+          .filter(x => !/education|software|internet|finance|health|fashion/i.test(x.t))
+          .find(Boolean);
+        return best ? best.t : "";
+      };
+
+      const findJobTitle = () => {
+        return (
+          firstText('a[href*="/jobs/"] h1') ||
+          firstText("h1") ||
+          firstText('a[href*="/jobs/"]')
+        );
+      };
+
+      const sliceBetween = (full, startMarker, endMarkers) => {
+        const start = full.indexOf(startMarker);
+        if (start === -1) return "";
+        const after = full.slice(start);
+        let end = after.length;
+        for (const m of endMarkers) {
+          const idx = after.indexOf(m);
+          if (idx !== -1 && idx < end) end = idx;
+        }
+        return after.slice(0, end).trim();
+      };
+
+      const findLocation = () => {
+        const text = bodyText();
+        const glance = sliceBetween(text, "At a glance", [
+          "The Role",
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+
+        if (glance) {
+          let m = glance.match(/based in\s+([A-Za-z .'-]+,\s*[A-Z]{2})/i);
+          if (m) return m[1];
+          if (/\bRemote\b/i.test(glance)) return "Remote";
+          if (/\bHybrid\b/i.test(glance)) return "Hybrid";
+          if (/\bOnsite\b/i.test(glance)) return "Onsite";
+          m = glance.match(/([A-Za-z .'-]+,\s*[A-Z]{2})/);
+          if (m) return m[1];
+        }
+
+        const about = sliceBetween(text, "About the employer", [
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        if (about) {
+          const m = about.match(/([A-Za-z .'-]+,\s*[A-Z]{2})/);
+          if (m) return m[1];
+        }
+
+        const role = sliceBetween(text, "The Role", [
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        if (role) {
+          const m =
+            role.match(/Location\s+([A-Za-z0-9 .,'()/-]+?)(?=\s{1,}What You'll Do|Who You Are|How You Work|What Success Looks Like|About|$)/i) ||
+            role.match(/Location\s+([A-Za-z .'-]+,\s*[A-Z]{2})/i);
+          if (m) return norm(m[1]);
+        }
+        return "";
+      };
+
+      const findJobDescription = () => {
+        const text = bodyText();
+        const jd = sliceBetween(text, "The Role", [
+          "What they're looking for",
+          "About the employer",
+          "Similar Jobs",
+          "Alumni in similar roles"
+        ]);
+        return jd ? jd : "";
+      };
+
+      return {
+        company: findCompany(),
+        title: findJobTitle(),
+        location: findLocation(),
+        description: findJobDescription(),
+        url: location.href
+      };
+    },
   };
 
   function siteSpecific() {
+    console.log('[scrape.js] TLD detected:', TLD);
     for (const key in strategies) {
       if (TLD === key || TLD.endsWith('.' + key)) {
+        console.log('[scrape.js] ✓ Matched strategy for:', key);
         let data = strategies[key]();
+        console.log('[scrape.js] Scraped data from', key, ':', data);
         if (key === 'jobs.careers.microsoft.com' && (!data.title || data.title.length < 2)) {
           const start = Date.now();
           while (Date.now() - start < 1000) {
@@ -672,6 +757,7 @@
         return data;
       }
     }
+    console.log('[scrape.js] ⚠ No site-specific strategy matched for:', TLD);
     return null;
   }
 
@@ -814,6 +900,7 @@
 
   function scrape() {
     const hrefLower = String(location.href || '').toLowerCase();
+    console.log('[scrape.js] Starting scrape for URL:', location.href);
 
     // TikTok override
     if (hrefLower.includes('lifeattiktok.com')) {
@@ -831,6 +918,7 @@
 
     // 1) JSON-LD
     let data = fromJsonLd();
+    console.log('[scrape.js] JSON-LD result:', data);
     // 2) Site specific
     if (!data) data = siteSpecific();
     // 3) Generic
@@ -847,6 +935,7 @@
     data.url = clean(data.url || "");
     data.description = truncateDescription(data.description || "");
 
+    console.log('[scrape.js] Final scraped data:', { company: data.company, title: data.title, location: data.location, hasDesc: !!data.description });
     return data;
   }
 

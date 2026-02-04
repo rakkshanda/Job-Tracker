@@ -1333,6 +1333,33 @@ class SupabaseJobTracker {
         }
     }
 
+    async updateJobFavorite(id, favorite) {
+        try {
+            const normalizedId = this.normalizeId(id);
+            if (!normalizedId) return false;
+            const { data, error } = await this.supabase
+                .from('jobs')
+                .update({ favorite })
+                .eq('id', normalizedId)
+                .select()
+                .single();
+            if (error) {
+                console.error('Error updating favorite:', error);
+                alert('Could not update favorite. Please try again.');
+                return false;
+            }
+            const idx = this.jobs.findIndex(j => this.idsMatch(j.id, normalizedId));
+            if (idx !== -1) {
+                this.jobs[idx] = { ...this.jobs[idx], favorite: data.favorite };
+            }
+            return true;
+        } catch (error) {
+            console.error('Exception updating favorite:', error);
+            alert('Could not update favorite. Please try again.');
+            return false;
+        }
+    }
+
     async updateJobSource(id, newSource) {
         try {
             const normalizedId = this.normalizeId(id);
@@ -1629,6 +1656,9 @@ class SupabaseJobTracker {
             const linkMarkup = url
                 ? `<a href="${url}" class="job-link" target="_blank" rel="noopener noreferrer" title="${this.sanitize(url)}"><i class="fas fa-external-link-alt"></i> View here</a>`
                 : '<span class="job-link muted">No link</span>';
+            const favorite = !!job.favorite;
+            const favoriteIconClass = favorite ? 'fas' : 'far';
+            const favoriteLabel = favorite ? 'Unstar job' : 'Star job';
             
             const statusOptions = this.statusOptions.map(option => {
                 const optionValue = option.toLowerCase();
@@ -1647,9 +1677,16 @@ class SupabaseJobTracker {
                         <input type="checkbox" class="job-checkbox" data-id="${jobId}">
                     </td>
                     <td>${appliedDate}</td>
+                    <td class="favorite-cell">
+                        <button class="favorite-toggle ${favorite ? 'active' : ''}" data-id="${jobId}" title="${favoriteLabel}" aria-label="${favoriteLabel}">
+                            <i class="${favoriteIconClass} fa-star"></i>
+                        </button>
+                    </td>
                     <td>${company}</td>
                     <td class="title-cell">
-                        <div class="job-title">${title}</div>
+                        <div class="title-row">
+                            <div class="job-title">${title}</div>
+                        </div>
                         ${jobIdMarkup}
                     </td>
                     <td>${location}</td>
@@ -1726,6 +1763,31 @@ class SupabaseJobTracker {
                         }, 2000);
                     }
                 }
+            });
+        });
+
+        // Favorite toggle
+        document.querySelectorAll('.favorite-toggle').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const id = btn.dataset.id;
+                if (!id) return;
+                const job = this.jobs.find(j => this.idsMatch(j.id, id));
+                if (!job) return;
+                const nextValue = !job.favorite;
+                btn.classList.add('updating');
+                const success = await this.updateJobFavorite(id, nextValue);
+                btn.classList.remove('updating');
+                if (!success) return;
+                job.favorite = nextValue;
+                btn.classList.toggle('active', nextValue);
+                const icon = btn.querySelector('i');
+                if (icon) {
+                    icon.classList.toggle('fas', nextValue);
+                    icon.classList.toggle('far', !nextValue);
+                }
+                btn.setAttribute('title', nextValue ? 'Unstar job' : 'Star job');
+                btn.setAttribute('aria-label', nextValue ? 'Unstar job' : 'Star job');
             });
         });
 
@@ -4315,6 +4377,7 @@ async function saveJob() {
                 company: jobTracker.normalizeCompanyName(formData.company || ''),
                 location: formData.location || '',
                 job_id: formData.jobId || '',
+                favorite: false,
                 status: formData.status || 'saved',
                 applied_date: jobTracker.getTodayDate(),
                 url: formData.url || '',
@@ -4445,6 +4508,28 @@ function updateThemeIcon(isDark) {
     }
 }
 
+// Reusable countdown renderer for event cards
+function renderCountdown(targetDateIso, numberId, subId, labelWhenActive = 'days to go') {
+    try {
+        const numberEl = document.getElementById(numberId);
+        const subEl = document.getElementById(subId);
+        const target = new Date(targetDateIso);
+        if (!numberEl || !subEl || isNaN(target)) return;
+
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const end = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const diffDays = Math.ceil((end - start) / msPerDay);
+        const daysRemaining = Math.max(0, diffDays); // Clamp to 0 to avoid "event passed"
+
+        numberEl.textContent = `${daysRemaining}`;
+        subEl.textContent = labelWhenActive;
+    } catch (e) {
+        console.warn('Countdown render failed:', e);
+    }
+}
+
     // Initialize the application
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('DOM loaded, initializing Supabase JobTracker...');
@@ -4479,31 +4564,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.warn('Theme toggle re-render failed:', e);
             }
         });
-        // Countdown banner: days remaining to 20 Dec 2025
-        try {
-            const target = new Date('2025-12-20T00:00:00');
-            const today = new Date();
-            const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-            const end = new Date(target.getFullYear(), target.getMonth(), target.getDate());
-            const msPerDay = 24 * 60 * 60 * 1000;
-            const diffDays = Math.ceil((end - start) / msPerDay);
-            const numberEl = document.getElementById('countdown-text');
-            const subEl = document.getElementById('countdown-subtext');
-            if (numberEl) {
-                if (diffDays > 0) {
-                    numberEl.textContent = `${diffDays}`;
-                    if (subEl) subEl.textContent = 'days to go';
-                } else if (diffDays === 0) {
-                    numberEl.textContent = '0';
-                    if (subEl) subEl.textContent = 'days to go';
-                } else {
-                    numberEl.textContent = '—';
-                    if (subEl) subEl.textContent = 'event passed';
-                }
-            }
-        } catch (e) {
-            console.warn('Countdown banner failed:', e);
-        }
+        // Countdown banner: Mar 1, 2026
+        renderCountdown('2026-03-01T00:00:00', 'countdown-text-march', 'countdown-subtext-march', 'days to Mar 1, 2026');
     } catch (error) {
         console.error('Error initializing Supabase JobTracker:', error);
     }
