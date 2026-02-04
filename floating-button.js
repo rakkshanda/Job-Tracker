@@ -341,25 +341,30 @@
   async function scrapeCurrentPage() {
     try {
       const pageUrl = window.location.href;
-      const pageTitle = document.title;
-      
-      // Helper functions
-      const txt = (el) => (el ? (el.textContent || "").trim() : "");
-      const clean = (s = "") => s.replace(/\s+/g, " ").replace(/\u00A0/g, " ").trim();
-      const first = (...sels) => {
-        for (const s of sels) {
-          try {
-            const el = document.querySelector(s);
-            if (el) return el;
-          } catch (e) {
-            continue;
+
+      // Always rely on the shared scrape.js logic for consistency
+      await ensureSharedScraper();
+      if (typeof window.__scrapeJob === 'function') {
+        try {
+          const r = window.__scrapeJob();
+          if (r && (r.title || r.company || r.location || r.description)) {
+            console.log('🔁 Shared scraper result:', r);
+            return {
+              url: pageUrl,
+              title: r.title || '',
+              company: r.company || '',
+              location: r.location || '',
+              description: r.description || '',
+              jobId: r.job_id || r.jobId || ''
+            };
           }
+        } catch (err) {
+          console.warn('⚠️ Shared scraper execution failed:', err);
         }
-        return null;
-      };
-      
-      // Initialize job data
-      const jobData = {
+      }
+
+      console.warn('⚠️ Shared scraper unavailable or returned empty data. Falling back to empty result.');
+      return {
         url: pageUrl,
         title: '',
         company: '',
@@ -367,286 +372,11 @@
         description: '',
         jobId: ''
       };
-
-      // Prefer shared scraper (same as Redo) for consistency
-      await ensureSharedScraper();
-      if (typeof window.__scrapeJob === 'function') {
-        try {
-          const sharedResult = window.__scrapeJob();
-          if (sharedResult && (sharedResult.title || sharedResult.company || sharedResult.location || sharedResult.description)) {
-            console.log('🔁 Shared scraper result:', sharedResult);
-            return {
-              ...jobData,
-              ...sharedResult,
-              jobId: sharedResult.job_id || sharedResult.jobId || jobData.jobId,
-              description: sharedResult.description || jobData.description,
-              company: sharedResult.company || jobData.company,
-              title: sharedResult.title || jobData.title,
-              location: sharedResult.location || jobData.location
-            };
-          }
-        } catch (e) {
-          console.warn('⚠️ Shared scraper execution failed:', e);
-        }
-      }
-
-      // Try JSON-LD first (works for many job boards)
-      const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
-      for (const script of jsonLdScripts) {
-        try {
-          const data = JSON.parse(script.textContent);
-          const items = Array.isArray(data) ? data : [data];
-          for (const d of items) {
-            if (d && (d["@type"] === "JobPosting" || d.type === "JobPosting")) {
-              jobData.title = clean(d.title || d.positionTitle || "");
-              jobData.company = clean(d.hiringOrganization?.name || d.hiringOrganization?.["@id"] || "");
-              
-              // Extract location from various formats
-              if (d.jobLocation) {
-                const loc = d.jobLocation;
-                if (typeof loc === 'string') {
-                  jobData.location = clean(loc);
-                } else if (loc.address) {
-                  const addr = loc.address;
-                  const parts = [
-                    addr.addressLocality,
-                    addr.addressRegion,
-                    addr.addressCountry
-                  ].filter(Boolean);
-                  jobData.location = clean(parts.join(", "));
-                } else if (loc.name) {
-                  jobData.location = clean(loc.name);
-                }
-              }
-              
-              jobData.description = clean((d.description || "").replace(/<[^>]+>/g, " ").substring(0, 1000));
-              
-              // Try to extract job ID from JSON-LD
-              jobData.jobId = clean(d.identifier?.value || d.identifier || d.jobId || d.id || "");
-              
-              if (jobData.title || jobData.company) {
-                console.log('✅ Found data via JSON-LD:', jobData);
-                return jobData;
-              }
-            }
-          }
-        } catch (e) {
-          console.log('⚠️ Error parsing JSON-LD:', e);
-        }
-      }
-
-      const scrapeTikTokFromPage = () => {
-        const container = document.querySelector('.jobDetail.positionDetail__1AqfZ, .jobDetail__1UFk5, .jobDetail');
-        if (!container) return null;
-        const titleEl = container.querySelector('[data-test="jobTitle"], h1, h2');
-        const jobTitle = clean(txt(titleEl));
-        let locationText = '';
-        const locEl = container.querySelector('.job-info .content__3ZUKJ.clamp-content, .job-info [class*="content"], [data-test="job-location"]');
-        if (locEl) locationText = clean(txt(locEl));
-        let jobIdText = '';
-        container.querySelectorAll('.job-info span, .job-info div').forEach(span => {
-          const t = (span.textContent || '').trim();
-          const match = t.match(/Job ID:\s*(\S+)/i);
-          if (match && !jobIdText) jobIdText = match[1];
-        });
-        if (!jobIdText) {
-          try {
-            const u = new URL(pageUrl);
-            const parts = u.pathname.split('/').filter(Boolean);
-            if (parts.length >= 3) jobIdText = parts[2];
-          } catch {}
-        }
-        const descParts = [];
-        container.querySelectorAll('.block-title, .block-content, .description-block, .section-content').forEach(el => {
-          const text = clean(txt(el));
-          if (text) descParts.push(text);
-        });
-        const jobDescription = descParts.join('\n\n') || clean(txt(container));
-        return {
-          company: 'TikTok',
-          title: jobTitle,
-          location: locationText,
-          jobId: jobIdText,
-          description: jobDescription.slice(0, 3000)
-        };
-      };
-
-      const isTikTokHost = (() => {
-        try { return new URL(pageUrl).hostname.includes('lifeattiktok.com'); }
-        catch { return pageUrl.includes('lifeattiktok.com'); }
-      })();
-
-      if (isTikTokHost) {
-        const tikTokData = scrapeTikTokFromPage();
-        if (tikTokData) {
-          Object.assign(jobData, tikTokData);
-          // Early return since we have site-specific data
-          return jobData;
-        }
-      }
-      // LinkedIn
-      if (pageUrl.includes('linkedin.com/jobs')) {
-        jobData.title = txt(first('.job-details-jobs-unified-top-card__job-title', '.jobs-unified-top-card__job-title', 'h1.t-24', 'h1'));
-        jobData.company = txt(first('.job-details-jobs-unified-top-card__company-name', '.jobs-unified-top-card__company-name', 'a.app-aware-link'));
-        
-        // LinkedIn location - try multiple selectors
-        jobData.location = txt(first(
-          '.job-details-jobs-unified-top-card__bullet',
-          '.jobs-unified-top-card__bullet',
-          'span.jobs-unified-top-card__workplace-type',
-          'span.job-details-jobs-unified-top-card__workplace-type',
-          '.job-details-jobs-unified-top-card__primary-description span',
-          '.jobs-unified-top-card__primary-description span',
-          'span[class*="workplace"]',
-          'span[class*="location"]'
-        ));
-        
-        // If still no location, try to find it in the company info section
-        if (!jobData.location) {
-          const companyInfoSection = document.querySelector('.job-details-jobs-unified-top-card__primary-description, .jobs-unified-top-card__primary-description');
-          if (companyInfoSection) {
-            const spans = companyInfoSection.querySelectorAll('span');
-            for (const span of spans) {
-              const text = txt(span);
-              // Location usually contains city/state or "Remote"
-              if (text && (text.includes(',') || text.toLowerCase().includes('remote') || /[A-Z][a-z]+,\s*[A-Z]{2}/.test(text))) {
-                jobData.location = text;
-                break;
-              }
-            }
-          }
-        }
-        
-        jobData.description = txt(first('.jobs-description-content__text', '.jobs-box__html-content', '#job-details'))?.substring(0, 1000) || '';
-      }
-      // Microsoft Careers
-      else if (pageUrl.includes('careers.microsoft.com') || pageUrl.includes('jobs.careers.microsoft.com')) {
-        jobData.title = txt(first('h1[data-automation-id="jobTitle"]', 'h1', '[class*="title"]'));
-        jobData.company = 'Microsoft';
-        jobData.location = txt(first(
-          '[data-automation-id="jobLocation"]',
-          '[class*="location"]',
-          '.job-info span',
-          'div[class*="Location"]'
-        ));
-        jobData.description = txt(first(
-          '[data-automation-id="jobDescription"]',
-          '[class*="description"]',
-          '.job-description',
-          'main'
-        ))?.substring(0, 1000) || '';
-      }
-      // Indeed
-      else if (pageUrl.includes('indeed.com')) {
-        jobData.title = txt(first('h1[class*="jobTitle"]', 'h1.jobsearch-JobInfoHeader-title', 'h1'));
-        jobData.company = txt(first('[data-company-name="true"]', '[class*="companyName"]', 'div[data-testid="inlineHeader-companyName"]'));
-        jobData.location = txt(first('[data-testid="job-location"]', '[class*="companyLocation"]'));
-        jobData.description = txt(first('#jobDescriptionText', '[id*="jobDesc"]', '.jobsearch-jobDescriptionText'))?.substring(0, 1000) || '';
-      }
-      // Handshake
-      else if (pageUrl.includes('joinhandshake.com') || pageUrl.includes('handshake.com')) {
-        jobData.title = txt(first('h1[class*="jobTitle"]', 'h1', '[class*="title"]'));
-        // Handshake company detection
-        const aboutEmployerHeadings = Array.from(document.querySelectorAll('h1, h2, h3, h4'))
-          .filter(h => h.textContent?.toLowerCase().includes('about the employer'));
-        for (const heading of aboutEmployerHeadings) {
-          const container = heading.closest('div, section');
-          if (container) {
-            const companyEl = container.querySelector('p.heading, .heading');
-            if (companyEl) {
-              jobData.company = clean(companyEl.textContent);
-              break;
-            }
-          }
-        }
-        if (!jobData.company) {
-          jobData.company = txt(first('[class*="company"]', '[class*="employer"]'));
-        }
-        jobData.location = txt(first('[class*="location"]', '[class*="Location"]'));
-        jobData.description = txt(first('[class*="description"]', 'main', 'article'))?.substring(0, 1000) || '';
-      }
-      // Greenhouse
-      else if (pageUrl.includes('greenhouse.io') || pageUrl.includes('boards.greenhouse.io')) {
-        jobData.title = txt(first('.app-title', 'h1'));
-        jobData.company = txt(first('.company-name', '[class*="company"]'));
-        jobData.location = txt(first('.location', '[class*="location"]'));
-        jobData.description = txt(first('#content', '.body', '.content'))?.substring(0, 1000) || '';
-      }
-      // Lever
-      else if (pageUrl.includes('lever.co')) {
-        jobData.title = txt(first('.posting-headline h2', 'h2', 'h1'));
-        jobData.company = txt(first('.main-header-text-item-company', '[class*="company"]'));
-        jobData.location = txt(first('.posting-categories .location', '.location'));
-        jobData.description = txt(first('.section-wrapper .content', '.content', 'main'))?.substring(0, 1000) || '';
-      }
-      // Workday
-      else if (pageUrl.includes('myworkdayjobs.com') || pageUrl.includes('workday.com')) {
-        jobData.title = txt(first('h2[data-automation-id="jobPostingHeader"]', 'h1', 'h2'));
-        jobData.company = txt(first('[data-automation-id="company"]', '[class*="company"]')) || pageUrl.split('.myworkdayjobs.com')[0].split('//')[1];
-        jobData.location = txt(first('[data-automation-id="locations"]', '[class*="location"]'));
-        jobData.description = txt(first('[data-automation-id="jobPostingDescription"]', '[class*="description"]'))?.substring(0, 1000) || '';
-      }
-      // Generic fallback
-      else {
-        jobData.title = txt(first('h1', '[class*="title"][class*="job"]', '[class*="job"][class*="title"]', '[role="heading"]')) || pageTitle;
-        jobData.company = txt(first('[class*="company"]', '[class*="employer"]', '[class*="organization"]'));
-        jobData.location = txt(first('[class*="location"]', '[class*="address"]'));
-        jobData.description = txt(first('[class*="description"]', '[class*="detail"]', 'main', 'article'))?.substring(0, 1000) || '';
-      }
-
-      // Clean all fields
-      Object.keys(jobData).forEach(key => {
-        if (typeof jobData[key] === 'string') {
-          jobData[key] = clean(jobData[key]);
-        }
-      });
-
-      // Extract job ID from URL if not found yet
-      if (!jobData.jobId) {
-        try {
-          const url = new URL(pageUrl);
-          
-          // LinkedIn: Extract from currentJobId or view parameters
-          if (pageUrl.includes('linkedin.com')) {
-            const currentJobId = url.searchParams.get('currentJobId');
-            if (currentJobId) {
-              jobData.jobId = currentJobId;
-            } else {
-              // Try to extract from path like /jobs/view/123456789/
-              const match = pageUrl.match(/\/jobs\/view\/(\d+)/);
-              if (match) jobData.jobId = match[1];
-            }
-          }
-          
-          // Indeed: Extract from jk parameter
-          else if (pageUrl.includes('indeed.com')) {
-            const jk = url.searchParams.get('jk');
-            if (jk) jobData.jobId = jk;
-          }
-          
-          // Handshake: Extract from job ID in path
-          else if (pageUrl.includes('handshake')) {
-            const match = pageUrl.match(/\/jobs\/(\d+)/);
-            if (match) jobData.jobId = match[1];
-          }
-          
-          // Generic: Try to extract any numeric ID from URL
-          else {
-            const match = pageUrl.match(/(?:job|position|posting)[\/\-_]?(?:id)?[\/\-_=]?(\d{5,})/i);
-            if (match) jobData.jobId = match[1];
-          }
-        } catch (e) {
-          console.log('⚠️ Could not extract job ID from URL:', e);
-        }
-      }
-      
-      console.log('📊 Scraped data:', jobData);
-      return jobData;
-    } catch (error) {
-      console.error('❌ Error scraping page:', error);
+    } catch (e) {
+      console.error('❌ scrapeCurrentPage failed:', e);
       return {
         url: window.location.href,
-        title: document.title,
+        title: '',
         company: '',
         location: '',
         description: '',
