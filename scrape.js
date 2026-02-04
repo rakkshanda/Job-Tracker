@@ -217,138 +217,153 @@
   // Site-specific strategies (only the ones you want)
   const strategies = {
     // LinkedIn
-    "linkedin.com": () => {
-      const company = clean(txt(first(
-        ".job-details-jobs-unified-top-card__company-name",
-        ".job-details-jobs-unified-top-card__company-name a",
-        ".jobs-unified-top-card__company-name",
-        ".jobs-unified-top-card__company-name a",
-        ".job-card-container__company-name",
-        ".job-card-container__company-name a",
-        ".job-card-list__company-name",
-        ".job-card-list__company-name a",
-        ".jobs-details__main-content .jobs-details__company-name",
-        ".jobs-details__main-content .jobs-details__company-name a",
-        ".jobs-details__main-content h3",
-        ".jobs-details__main-content .jobs-details__company-info h3",
-        "[data-testid='company-name']",
-        ".company-name",
-        ".employer-name",
-        ".organization-name",
-        ".topcard__org-name-link",
-        "h3[class*='company']",
-        "a[class*='company']"
-      )));
+   // LinkedIn
+"linkedin.com": () => {
+  const company = clean(txt(first(
+    ".job-details-jobs-unified-top-card__company-name",
+    ".job-details-jobs-unified-top-card__company-name a",
+    ".jobs-unified-top-card__company-name",
+    ".jobs-unified-top-card__company-name a",
+    ".job-card-container__company-name",
+    ".job-card-container__company-name a",
+    ".job-card-list__company-name",
+    ".job-card-list__company-name a",
+    ".jobs-details__main-content .jobs-details__company-name",
+    ".jobs-details__main-content .jobs-details__company-name a",
+    ".jobs-details__main-content h3",
+    ".jobs-details__main-content .jobs-details__company-info h3",
+    "[data-testid='company-name']",
+    ".company-name",
+    ".employer-name",
+    ".organization-name",
+    ".topcard__org-name-link",
+    "h3[class*='company']",
+    "a[class*='company']"
+  )));
 
-      const title = clean(txt(first(
-        ".job-details-jobs-unified-top-card__job-title",
-        ".job-details-jobs-unified-top-card__job-title a",
-        ".jobs-unified-top-card__job-title",
-        ".jobs-unified-top-card__job-title a",
-        ".job-card-container__title",
-        ".job-card-container__title a",
-        ".job-card-list__title",
-        ".job-card-list__title a",
-        ".jobs-details__main-content h1",
-        ".jobs-details__main-content .jobs-details__job-title",
-        ".jobs-details__main-content .jobs-details__job-title a",
-        "[data-testid='job-title']",
-        "h1",
-        ".job-title",
-        ".position-title",
-        ".topcard__title",
-        "h1[class*='title']",
-        "a[class*='title']"
-      )));
+  const title = clean(txt(first(
+    ".job-details-jobs-unified-top-card__job-title",
+    ".job-details-jobs-unified-top-card__job-title a",
+    ".jobs-unified-top-card__job-title",
+    ".jobs-unified-top-card__job-title a",
+    ".job-card-container__title",
+    ".job-card-container__title a",
+    ".job-card-list__title",
+    ".job-card-list__title a",
+    ".jobs-details__main-content h1",
+    ".jobs-details__main-content .jobs-details__job-title",
+    ".jobs-details__main-content .jobs-details__job-title a",
+    "[data-testid='job-title']",
+    "h1",
+    ".job-title",
+    ".position-title",
+    ".topcard__title",
+    "h1[class*='title']",
+    "a[class*='title']"
+  )));
 
-      const locationVal = clean(txt(first(
-        ".job-details-jobs-unified-top-card__bullet",
-        ".jobs-unified-top-card__bullet",
-        ".job-details-jobs-unified-top-card__subtitle",
-        ".jobs-unified-top-card__subtitle",
-        ".job-card-container__metadata-item",
-        ".job-card-container__metadata-item--bullet",
-        ".job-card-list__metadata-item",
-        ".job-card-list__metadata-item--bullet",
-        ".jobs-details__main-content .jobs-details__location",
-        ".jobs-details__main-content .jobs-details__metadata",
-        ".jobs-details__main-content .jobs-details__metadata-item",
-        ".jobs-unified-top-card__bullet--black",
-        ".job-details-jobs-unified-top-card__bullet--black",
-        ".jobs-unified-top-card__subtitle-item",
-        ".job-details-jobs-unified-top-card__subtitle-item",
-        ".jobs-unified-top-card__subtitle-item--bullet",
-        ".job-details-jobs-unified-top-card__subtitle-item--bullet",
-        ".jobs-unified-top-card__job-title + .jobs-unified-top-card__subtitle",
-        ".job-details-jobs-unified-top-card__job-title + .job-details-jobs-unified-top-card__subtitle",
-        ".jobs-unified-top-card__company-name + .jobs-unified-top-card__subtitle",
-        ".job-details-jobs-unified-top-card__company-name + .job-details-jobs-unified-top-card__subtitle",
-        ".jobs-unified-top-card__subtitle .jobs-unified-top-card__bullet",
-        ".job-details-jobs-unified-top-card__subtitle .job-details-jobs-unified-top-card__bullet",
-        ".jobs-unified-top-card__subtitle .jobs-unified-top-card__subtitle-item",
-        ".job-details-jobs-unified-top-card__subtitle .job-details-jobs-unified-top-card__subtitle-item",
-        ".top-card-layout__second-subline .topcard__flavor--bullet",
-        ".top-card-layout__second-subline .topcard__flavor",
-        "[data-testid='inlineHeader-companyLocation']",
-        "[data-testid='job-location']",
-        "[data-testid='location']",
-        ".location",
-        ".job-location",
-        ".work-location",
-        ".job-loc",
-        ".loc"
-      ))) || (() => {
-        const pageText = document.body.innerText || '';
-        const patterns = [
-          /(?:Location|Work Location|Office Location|Job Location)[:\s]*([^\n\r]+)/i,
-          /(?:Based in|Located in|Office in)[:\s]*([^\n\r]+)/i,
-          /(?:Remote|Hybrid|On-site|Onsite|Work from home|WFH)/i,
-          /([A-Za-z\s]+,\s*[A-Z]{2,3}(?:\s*,\s*[A-Za-z\s]+)?)/,
-          /(?:United States|USA|Canada|UK|United Kingdom|Europe|India|Australia|Germany|France|Netherlands|Singapore|Japan)/i
-        ];
-        for (const pattern of patterns) {
-          const m = pageText.match(pattern);
-          if (m) return clean(m[1] || m[0]);
-        }
-        return '';
-      })();
+  // ---- LOCATION (robust + normalized) ----
+  const rawLocationText = clean(txt(first(
+    ".job-details-jobs-unified-top-card__primary-description-container",
+    ".job-details-jobs-unified-top-card__primary-description",
+    ".job-details-jobs-unified-top-card__subtitle",
+    ".jobs-unified-top-card__subtitle",
+    ".job-details-jobs-unified-top-card__bullet",
+    ".jobs-unified-top-card__bullet",
+    ".jobs-unified-top-card__subtitle-item",
+    ".job-details-jobs-unified-top-card__subtitle-item",
+    ".top-card-layout__second-subline",
+    ".top-card-layout__second-subline .topcard__flavor",
+    ".top-card-layout__second-subline .topcard__flavor--bullet",
+    "[data-testid='inlineHeader-companyLocation']",
+    "[data-testid='job-location']",
+    "[data-testid='location']",
+    ".jobs-details__main-content .jobs-details__location",
+    ".jobs-details__main-content .jobs-details__metadata",
+    ".job-card-container__metadata-item",
+    ".job-card-list__metadata-item",
+    ".location",
+    ".job-location",
+    ".work-location"
+  )));
 
-      const description = clean(txt(first(
-        ".jobs-description-content__text",
-        ".jobs-description-content",
-        ".jobs-description",
-        ".job-details-jobs-unified-top-card__job-description",
-        ".jobs-unified-top-card__job-description",
-        ".jobs-box__html-content",
-        ".jobs-description-content__text p",
-        ".jobs-description-content__text div",
-        "[data-testid='job-description']",
-        ".description",
-        ".job-description",
-        ".content",
-        "main",
-        "article"
-      ))) || (() => {
-        const descElements = document.querySelectorAll(
-          '.jobs-description-content__text p, .jobs-description-content__text div, .jobs-description-content p, .jobs-description-content div'
-        );
-        if (descElements.length > 0) {
-          return Array.from(descElements)
-            .map(el => clean(el.textContent || ''))
-            .join(' ')
-            .trim();
-        }
-        return '';
-      })();
+  const extractLocationChunk = (text) => {
+    if (!text) return "";
 
-      return {
-        company: company || "",
-        title: title || "",
-        location: locationVal || "",
-        url: location.href,
-        description: description || ""
-      };
-    },
+    const parts = text.split("·").map(t => clean(t)).filter(Boolean);
+
+    // Prefer City, ST or Country
+    for (const p of parts) {
+      if (/[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(p)) return p;
+      if (/(United States|USA|Canada|UK|India|Europe|Australia)/i.test(p)) return p;
+      if (/Remote/i.test(p)) return "Remote";
+      if (/Hybrid/i.test(p)) return "Hybrid";
+      if (/On[-\s]?site|Onsite/i.test(p)) return "On-site";
+    }
+
+    return parts[0] || "";
+  };
+
+  const locationFallbackFromText = () => {
+    const pageText = document.body.innerText || "";
+    const patterns = [
+      /(?:Location|Work Location|Office Location|Job Location)\s*[:\-]\s*([^\n\r]+)/i,
+      /(?:Based in|Located in|Office in)\s*[:\-]\s*([^\n\r]+)/i,
+      /\b(Remote|Hybrid|On[-\s]?site|Onsite|Work from home|WFH)\b/i,
+      /\b([A-Za-z .'-]+,\s*[A-Z]{2})\b/,
+      /\b(United States|USA|Canada|UK|India|Europe|Australia)\b/i
+    ];
+
+    for (const p of patterns) {
+      const m = pageText.match(p);
+      if (m) return clean(m[1] || m[0]);
+    }
+    return "";
+  };
+
+  const normalizeLocation = (loc) => {
+    if (!loc) return "";
+    if (/remote/i.test(loc)) return "Remote";
+    if (/hybrid/i.test(loc)) return "Hybrid";
+    if (/on[-\s]?site|onsite/i.test(loc)) return "On-site";
+    return loc;
+  };
+
+  const locationVal = normalizeLocation(
+    extractLocationChunk(rawLocationText) || locationFallbackFromText()
+  );
+
+  // ---- DESCRIPTION ----
+  const description = clean(txt(first(
+    ".jobs-description-content__text",
+    ".jobs-description-content",
+    ".jobs-description",
+    ".jobs-box__html-content",
+    "[data-testid='job-description']",
+    "article",
+    "main"
+  ))) || (() => {
+    const els = document.querySelectorAll(
+      ".jobs-description-content__text p, .jobs-description-content__text div, .jobs-description-content p, .jobs-description-content div"
+    );
+    if (els.length) {
+      return Array.from(els)
+        .map(el => clean(el.textContent || ""))
+        .join(" ")
+        .trim();
+    }
+    return "";
+  })();
+
+  return {
+    company: company || "",
+    title: title || "",
+    location: locationVal || "",
+    url: location.href,
+    description: description || ""
+  };
+},
+
 
     // Indeed
     "indeed.com": () => ({
