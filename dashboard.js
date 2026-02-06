@@ -1106,6 +1106,23 @@ class SupabaseJobTracker {
                 this.selectedMonth = { year: parseInt(year), month: parseInt(month) };
                 this.updateActivitySummary();
             });
+
+            const shiftMonth = (delta) => {
+                if (!monthSelector.options.length) return;
+                let idx = monthSelector.selectedIndex;
+                if (idx === -1) idx = 0;
+                const newIdx = Math.min(Math.max(idx + delta, 0), monthSelector.options.length - 1);
+                if (newIdx === idx) return;
+                monthSelector.selectedIndex = newIdx;
+                const [y, m] = monthSelector.value.split('-');
+                this.selectedMonth = { year: parseInt(y), month: parseInt(m) };
+                this.updateActivitySummary();
+            };
+
+            const prevBtn = document.getElementById('month-prev');
+            const nextBtn = document.getElementById('month-next');
+            prevBtn?.addEventListener('click', () => shiftMonth(-1));
+            nextBtn?.addEventListener('click', () => shiftMonth(1));
         }
 
     }
@@ -2856,15 +2873,15 @@ class SupabaseJobTracker {
             }
         });
         
-        // Convert to array and sort (newest first)
+        // Convert to array and sort ascending (oldest → newest)
         const months = Array.from(monthsSet)
             .map(key => {
                 const [year, month] = key.split('-');
                 return { year: parseInt(year), month: parseInt(month) };
             })
             .sort((a, b) => {
-                if (a.year !== b.year) return b.year - a.year;
-                return b.month - a.month;
+                if (a.year !== b.year) return a.year - b.year;
+                return a.month - b.month;
             });
         
         // Populate dropdown

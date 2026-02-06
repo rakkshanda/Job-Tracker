@@ -498,6 +498,35 @@ body.dark-mode .nav-tab.active {
 
 .activity-header {
     margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.month-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.month-arrow {
+    border: none;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    font-size: 18px;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.month-arrow:hover {
+    background: var(--border-color);
+}
+
+.month-arrow:active {
+    transform: translateY(1px);
 }
 
 .month-selector {

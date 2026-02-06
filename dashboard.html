@@ -314,11 +314,15 @@
         <!-- Activity Summary Cards -->
         <div class="activity-summary" id="activity-summary">
             <!-- This Month Card -->
-            <div class="activity-card">
+                <div class="activity-card">
                 <div class="activity-header">
-                    <select class="month-selector" id="month-selector">
-                        <!-- Options will be populated dynamically -->
-                    </select>
+                    <div class="month-nav">
+                        <button type="button" class="month-arrow" id="month-prev" aria-label="Previous month">‹</button>
+                        <select class="month-selector" id="month-selector">
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                        <button type="button" class="month-arrow" id="month-next" aria-label="Next month">›</button>
+                    </div>
                 </div>
                 <div class="activity-total" id="month-total">0 applications</div>
                 <div class="activity-weeks">
