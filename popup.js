@@ -210,14 +210,8 @@ function handleParentMessage(event) {
     return; // will be processed once ready
   }
   if (msg.type === 'SCRAPING_STARTED') {
-    // show loading and set a timeout fail-safe
-    startLoading();
-    if (loadingTimer) clearTimeout(loadingTimer);
-    loadingTimer = setTimeout(() => {
-      stopLoading();
-      const st = document.getElementById('statusMessage');
-      if (st) st.textContent = "Couldn't auto-fill. Try Redo.";
-    }, LOADING_TIMEOUT_MS);
+    // Ignore auto-start signals; popup stays idle/blank until user acts
+    return;
   } else if (msg.type === 'SCRAPED_DATA' && msg.data) {
     if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
     stopLoading();
@@ -651,10 +645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('📨 Received message:', event.data);
     
     if (event.data && event.data.type === 'SCRAPING_STARTED') {
-      console.log('🔄 Scraping started...');
-      showSkeletonLoading();
-      setStatusValue(DEFAULT_STATUS);
-      enableStatusTabs();
+      console.log('🔄 Scraping started signal ignored (no auto-fill).');
       return;
     }
     
