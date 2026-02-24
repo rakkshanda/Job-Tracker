@@ -105,3 +105,4 @@ cd save-jobs-extension
 ## Notes
 - Do not commit `config.js` (gitignored).
 - Policies above are permissive for dev; tighten for production.
+
