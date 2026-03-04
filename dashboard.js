@@ -5183,6 +5183,7 @@ class PomodoroTimer {
             modal.style.display = 'flex';
         }
     }
+    
 
     hideCancelModal() {
         console.log('✅ Hiding cancel timer modal');
