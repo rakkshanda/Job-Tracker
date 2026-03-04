@@ -5184,6 +5184,7 @@ class PomodoroTimer {
         }
     }
 
+
     hideCancelModal() {
         console.log('✅ Hiding cancel timer modal');
         const modal = document.getElementById('cancel-timer-modal');
