@@ -5102,6 +5102,7 @@ class PomodoroTimer {
 
         console.log('✅ Pomodoro timer initialized');
     }
+    
 
     toggleSection() {
         const section = document.getElementById('pomodoro-section');
